@@ -3,12 +3,14 @@ import type { JournalRow, NetworkName, Side, WindowMarket } from "./lib/types";
 import { formatCountdown, formatProb, formatUsd, plainLanguage, quoteTicket, shorten, STATUS_LABEL } from "./lib/format";
 import { appendJournal, loadJournal } from "./lib/journal";
 import { connectExchange, derivePositions, disconnectExchange, listWindows, maskKey, placeStake, redeemMarket } from "./lib/sdk";
+import Landing from "./Landing";
 
 type Tab = "markets" | "desk";
 
 const DEFAULT_STAKE = 10;
 
 export default function App() {
+  const [entered, setEntered] = useState(false);
   const [tab, setTab] = useState<Tab>("markets");
   const [network, setNetwork] = useState<NetworkName>("shannon");
   const [privateKey, setPrivateKey] = useState("");
@@ -155,8 +157,21 @@ export default function App() {
     }
   }
 
+  if (!entered) {
+    return <Landing onLaunch={() => setEntered(true)} />;
+  }
+
   return (
     <div className="app">
+      <nav className="app-nav">
+        <button className="wordmark" onClick={() => setEntered(false)}>
+          <span className="mark">K</span>
+          Keel
+        </button>
+        <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
+          View source
+        </a>
+      </nav>
       <header className="top">
         <div className="brand">
           <h1>Keel</h1>
