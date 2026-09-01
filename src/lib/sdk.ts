@@ -1,3 +1,4 @@
+import { privateKeyToAccount } from "viem/accounts";
 import type { Claimable, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
 import { detectAsset, detectTimeframe, statusFromCode } from "./format";
 
@@ -24,11 +25,27 @@ type Exchange = {
       isResolved?: boolean;
       isVoided?: boolean;
       winningOutcome?: number;
+      marketAddress?: `0x${string}`;
+      outcomeToken?: `0x${string}`;
+      yesId?: bigint | number | string;
+      noId?: bigint | number | string;
       [k: string]: unknown;
     }>;
+    getOutcomeBalance?: (
+      outcomeToken: `0x${string}`,
+      account: `0x${string}`,
+      tokenId: bigint | number | string,
+    ) => Promise<bigint>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
   };
   trader?: {
+    redeem?: (args: {
+      marketId: `0x${string}`;
+      market: `0x${string}`;
+      outcomeToken: `0x${string}`;
+      outcomeIdx: number;
+      amount: bigint;
+    }) => Promise<any>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
     cancelOrder?: (...args: any[]) => Promise<any>;
   };
@@ -36,6 +53,7 @@ type Exchange = {
 
 let exchange: Exchange | null = null;
 let lastConfig: string = "";
+let accountAddress: `0x${string}` | null = null;
 
 export function maskKey(key: string): string {
   if (!key) return "";
@@ -73,8 +91,11 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
     addresses,
   };
   if (config.privateKey) {
-    const key = config.privateKey.startsWith("0x") ? config.privateKey : `0x${config.privateKey}`;
+    const key = (config.privateKey.startsWith("0x") ? config.privateKey : `0x${config.privateKey}`) as `0x${string}`;
     opts.privateKey = key;
+    accountAddress = privateKeyToAccount(key).address;
+  } else {
+    accountAddress = null;
   }
 
   exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
@@ -89,6 +110,7 @@ export function isConnected(): boolean {
 export function disconnectExchange(): void {
   exchange = null;
   lastConfig = "";
+  accountAddress = null;
 }
 
 function pickImplied(book: any): { bid: number | null; ask: number | null; mid: number | null } {
@@ -300,27 +322,59 @@ export async function redeemMarket(
   side: Side,
 ): Promise<{ hash?: string; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
   if (!exchange) throw new Error("Exchange is not connected.");
-  const trader = exchange.trader ?? (exchange.client as any);
-  if (typeof trader?.redeemOutcome !== "function" && typeof exchange.client.redeemOutcome !== "function") {
-    throw new Error(
-      "This SDK build does not expose redeemOutcome on the client used here. Check docs.dreamdex.io/developers/event-contracts/recipes and wire the method name from your installed version.",
-    );
+
+  const oc = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
+
+  let raw: any;
+  if (typeof exchange.trader?.redeem === "function" && typeof exchange.client.getOutcomeBalance === "function") {
+    const { marketAddress, outcomeToken, yesId, noId } = oc;
+    if (!marketAddress || !outcomeToken || yesId === undefined || noId === undefined) {
+      throw new Error(
+        "getMarketOnchain did not return marketAddress/outcomeToken/yesId/noId for this market, so the redeem call can't be built. Check docs.dreamdex.io/developers/event-contracts/recipes against the installed SDK version.",
+      );
+    }
+    if (!accountAddress) {
+      throw new Error("No session key connected. Add a session key before redeeming.");
+    }
+
+    const outcomeIdx = side === "up" ? 0 : 1;
+    const tokenId = outcomeIdx === 0 ? yesId : noId;
+    const amount = await exchange.client.getOutcomeBalance(outcomeToken, accountAddress, tokenId);
+    if (amount === 0n) {
+      throw new Error("No redeemable balance held for this side on this market.");
+    }
+
+    raw = await exchange.trader.redeem({
+      marketId: marketId as `0x${string}`,
+      market: marketAddress,
+      outcomeToken,
+      outcomeIdx,
+      amount,
+    });
+  } else {
+    // Fall back to an older SDK surface that redeems by marketId alone.
+    const trader = exchange.trader ?? (exchange.client as any);
+    const fn = trader?.redeemOutcome ?? exchange.client.redeemOutcome;
+    if (typeof fn !== "function") {
+      throw new Error(
+        "This SDK build exposes neither trader.redeem(...) nor redeemOutcome(marketId). Check docs.dreamdex.io/developers/event-contracts/recipes and wire the method from your installed version.",
+      );
+    }
+    raw = await fn(marketId);
   }
-  const fn = trader.redeemOutcome ?? exchange.client.redeemOutcome;
-  const raw = await fn(marketId);
+
+  if (raw?.receipt?.status === "reverted") {
+    throw new Error("Redeem transaction reverted on-chain.");
+  }
+
   const hash = raw?.receipt?.transactionHash || raw?.transactionHash;
 
   let result: "win" | "loss" | "void" | "pending" = "pending";
-  try {
-    const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
-    if (onchain.isVoided) {
-      result = "void";
-    } else if (onchain.isResolved) {
-      const winningSide = sideFromWinningOutcome(onchain.winningOutcome);
-      result = winningSide === side ? "win" : "loss";
-    }
-  } catch {
-    /* settlement unreadable; leave as pending rather than assume a win */
+  if (oc.isVoided) {
+    result = "void";
+  } else if (oc.isResolved) {
+    const winningSide = sideFromWinningOutcome(oc.winningOutcome);
+    result = winningSide === side ? "win" : "loss";
   }
 
   return { hash, result, raw };
