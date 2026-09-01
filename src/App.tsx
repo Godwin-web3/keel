@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { JournalRow, NetworkName, Side, WindowMarket } from "./lib/types";
 import {
   ASSET_ICON,
@@ -36,6 +36,8 @@ export default function App() {
   const [network, setNetwork] = useState<NetworkName>("shannon");
   const [privateKey, setPrivateKey] = useState("");
   const [connected, setConnected] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const ticketRef = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [markets, setMarkets] = useState<WindowMarket[]>([]);
@@ -76,6 +78,15 @@ export default function App() {
     setEntered(false);
   }
 
+  function selectMarket(id: string) {
+    setSelectedId(id);
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      requestAnimationFrame(() => {
+        ticketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
   const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
   const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
   const { open, claimable } = useMemo(() => derivePositions(markets, journal), [markets, journal]);
@@ -95,19 +106,17 @@ export default function App() {
     }
   }
 
-  async function onConnect() {
+  async function connectAndLoad(net: NetworkName, key?: string) {
     setBusy(true);
     setMessage(null);
     try {
-      await connectExchange({
-        network,
-        privateKey: privateKey.trim() || undefined,
-      });
+      await connectExchange({ network: net, privateKey: key });
       setConnected(true);
+      setSignedIn(Boolean(key));
       const rows = await listWindows();
       setMarkets(rows);
-      if (rows[0]) setSelectedId(rows[0].marketId);
-      setMessage({ kind: "ok", text: `Loaded ${rows.length} Event Contract window${rows.length === 1 ? "" : "s"}.` });
+      setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
+      setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
     } catch (err) {
       setConnected(false);
       setMessage({
@@ -119,11 +128,33 @@ export default function App() {
     }
   }
 
+  // Browsing is free, like Polymarket — load markets read-only as soon as the
+  // app opens instead of waiting on a manual "Connect" click.
+  useEffect(() => {
+    if (entered && !connected && !busy) {
+      void connectAndLoad(network);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entered]);
+
+  function onNetworkChange(next: NetworkName) {
+    setNetwork(next);
+    disconnectExchange();
+    setConnected(false);
+    setSignedIn(false);
+    setMarkets([]);
+    setSelectedId(null);
+    void connectAndLoad(next);
+  }
+
   function onDisconnect() {
     disconnectExchange();
     setConnected(false);
+    setSignedIn(false);
+    setPrivateKey("");
     setMarkets([]);
     setMessage({ kind: "ok", text: "Disconnected. Your wallet key was never saved anywhere." });
+    void connectAndLoad(network);
   }
 
   async function onTrade(side: Side) {
@@ -232,7 +263,11 @@ export default function App() {
         <div className="session">
           <label>Network</label>
           <div className="row">
-            <select value={network} onChange={(e) => setNetwork(e.target.value as NetworkName)} disabled={connected}>
+            <select
+              value={network}
+              onChange={(e) => onNetworkChange(e.target.value as NetworkName)}
+              disabled={signedIn || busy}
+            >
               <option value="shannon">Test network (practice money)</option>
               <option value="mainnet">Somnia mainnet (real money)</option>
             </select>
@@ -244,30 +279,34 @@ export default function App() {
               placeholder="0x... a spending key, never your main wallet"
               value={privateKey}
               onChange={(e) => setPrivateKey(e.target.value)}
-              disabled={connected}
+              disabled={signedIn}
               autoComplete="off"
             />
           </div>
           <div className="row">
-            {connected ? (
-              <>
-                <button className="ghost" onClick={() => void refresh()} disabled={busy}>
-                  Refresh
-                </button>
-                <button className="ghost" onClick={onDisconnect}>
-                  Disconnect
-                </button>
-              </>
-            ) : (
-              <button onClick={() => void onConnect()} disabled={busy}>
-                {busy ? "Connecting..." : "Connect"}
+            <button
+              onClick={() => void connectAndLoad(network, privateKey.trim() || undefined)}
+              disabled={busy || signedIn || !privateKey.trim()}
+            >
+              {busy ? "Connecting..." : signedIn ? "Connected" : "Connect wallet to bet"}
+            </button>
+            <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
+              Refresh
+            </button>
+            {signedIn && (
+              <button className="ghost" onClick={onDisconnect}>
+                Disconnect
               </button>
             )}
           </div>
           <div className="muted">
-            {connected
-              ? `Connected${privateKey ? ` · ${maskKey(privateKey)}` : " · just browsing"}`
-              : "You can look around for free. Betting needs a wallet key."}
+            {signedIn
+              ? `Connected · ${maskKey(privateKey)}`
+              : connected
+                ? "Just browsing — connect a wallet above to place bets."
+                : busy
+                  ? "Loading markets..."
+                  : "You can look around for free. Betting needs a wallet key."}
           </div>
         </div>
       </header>
@@ -287,7 +326,8 @@ export default function App() {
         <div className="grid">
           <section className="card">
             <h2>Will it go up or down?</h2>
-            {!connected && <p className="muted">Connect to see live BTC and ETH windows.</p>}
+            {!connected && !busy && <p className="muted">Couldn't load windows. Try refreshing.</p>}
+            {!connected && busy && <p className="muted">Loading live BTC and ETH windows...</p>}
             {connected && markets.length === 0 && (
               <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
             )}
@@ -298,7 +338,7 @@ export default function App() {
                 <article
                   key={m.marketId}
                   className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                  onClick={() => setSelectedId(m.marketId)}
+                  onClick={() => selectMarket(m.marketId)}
                 >
                   <div className="market-top">
                     <strong className="market-name">
@@ -323,7 +363,7 @@ export default function App() {
             })}
           </section>
 
-          <section className="card">
+          <section className="card" ref={ticketRef}>
             <h2>Place your bet</h2>
             {!selected && <p className="muted">Pick a window on the left.</p>}
             {selected && quote && (
@@ -359,14 +399,14 @@ export default function App() {
                 <div className="actions">
                   <button
                     className="up"
-                    disabled={busy || !privateKey || selected.status !== "trading"}
+                    disabled={busy || !signedIn || selected.status !== "trading"}
                     onClick={() => void onTrade("up")}
                   >
                     Bet Up
                   </button>
                   <button
                     className="down"
-                    disabled={busy || !privateKey || selected.status !== "trading"}
+                    disabled={busy || !signedIn || selected.status !== "trading"}
                     onClick={() => void onTrade("down")}
                   >
                     Bet Down
@@ -375,8 +415,8 @@ export default function App() {
                 <p className="muted" style={{ marginTop: 12 }}>
                   {selected.status !== "trading"
                     ? "This window isn't open for new bets right now."
-                    : !privateKey
-                      ? "Add a session key above to place a bet."
+                    : !signedIn
+                      ? "Connect a wallet above to place a bet."
                       : "You can only lose what you bet — never more."}
                 </p>
               </>
@@ -395,7 +435,7 @@ export default function App() {
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button
-                disabled={busy || claimable.length === 0 || !privateKey}
+                disabled={busy || claimable.length === 0 || !signedIn}
                 onClick={() => {
                   void (async () => {
                     for (const item of claimable) {
@@ -434,7 +474,7 @@ export default function App() {
                     <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
                     {c.asset} <span className="muted">· {c.timeframe} · {c.side === "up" ? "Up" : "Down"}</span>
                   </strong>
-                  <button disabled={busy || !privateKey} onClick={() => void onRedeem(c.marketId, c.symbol, c.side)}>
+                  <button disabled={busy || !signedIn} onClick={() => void onRedeem(c.marketId, c.symbol, c.side)}>
                     Claim {formatUsd(c.estimatedPayout)}
                   </button>
                 </div>
