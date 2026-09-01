@@ -19,7 +19,13 @@ type Exchange = {
   ) => Promise<any>;
   client: {
     listLiveBinaryMarkets?: (args?: { limit?: number }) => Promise<any[]>;
-    getMarketOnchain: (marketId: `0x${string}`) => Promise<{ status: number; [k: string]: unknown }>;
+    getMarketOnchain: (marketId: `0x${string}`) => Promise<{
+      status: number;
+      isResolved?: boolean;
+      isVoided?: boolean;
+      winningOutcome?: number;
+      [k: string]: unknown;
+    }>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
   };
   trader?: {
@@ -263,7 +269,17 @@ export async function placeStake(args: {
   return { hash, raw: order };
 }
 
-export async function redeemMarket(marketId: string): Promise<{ hash?: string; raw: unknown }> {
+function sideFromWinningOutcome(outcome: unknown): Side | null {
+  const n = Number(outcome);
+  if (n === 0) return "up";
+  if (n === 1) return "down";
+  return null;
+}
+
+export async function redeemMarket(
+  marketId: string,
+  side: Side,
+): Promise<{ hash?: string; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
   if (!exchange) throw new Error("Exchange is not connected.");
   const trader = exchange.trader ?? (exchange.client as any);
   if (typeof trader?.redeemOutcome !== "function" && typeof exchange.client.redeemOutcome !== "function") {
@@ -274,7 +290,21 @@ export async function redeemMarket(marketId: string): Promise<{ hash?: string; r
   const fn = trader.redeemOutcome ?? exchange.client.redeemOutcome;
   const raw = await fn(marketId);
   const hash = raw?.receipt?.transactionHash || raw?.transactionHash;
-  return { hash, raw };
+
+  let result: "win" | "loss" | "void" | "pending" = "pending";
+  try {
+    const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
+    if (onchain.isVoided) {
+      result = "void";
+    } else if (onchain.isResolved) {
+      const winningSide = sideFromWinningOutcome(onchain.winningOutcome);
+      result = winningSide === side ? "win" : "loss";
+    }
+  } catch {
+    /* settlement unreadable; leave as pending rather than assume a win */
+  }
+
+  return { hash, result, raw };
 }
 
 export function derivePositions(

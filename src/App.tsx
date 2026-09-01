@@ -103,18 +103,26 @@ export default function App() {
     }
   }
 
-  async function onRedeem(marketId: string, symbol: string) {
+  async function onRedeem(marketId: string, symbol: string, side: Side) {
     setBusy(true);
     setMessage(null);
     try {
-      const result = await redeemMarket(marketId);
+      const result = await redeemMarket(marketId, side);
+      const note =
+        result.result === "void"
+          ? "Voided window - stake returned"
+          : result.result === "win"
+            ? "Redeemed settled Event Contract"
+            : result.result === "loss"
+              ? "Redeemed losing position"
+              : "Redeemed - outcome unconfirmed";
       appendJournal({
         kind: "redeem",
         marketId,
         symbol,
-        result: "win",
+        result: result.result,
         hash: result.hash,
-        note: "Redeemed settled Event Contract",
+        note,
       });
 
       if (rollAfterRedeem) {
@@ -320,7 +328,7 @@ export default function App() {
                 onClick={() => {
                   void (async () => {
                     for (const item of claimable) {
-                      await onRedeem(item.marketId, item.symbol);
+                      await onRedeem(item.marketId, item.symbol, item.side);
                     }
                   })();
                 }}
@@ -351,7 +359,7 @@ export default function App() {
               <div key={c.marketId} className="market">
                 <div className="market-top">
                   <strong>{shorten(c.symbol, 8)}</strong>
-                  <button disabled={busy || !privateKey} onClick={() => void onRedeem(c.marketId, c.symbol)}>
+                  <button disabled={busy || !privateKey} onClick={() => void onRedeem(c.marketId, c.symbol, c.side)}>
                     Redeem
                   </button>
                 </div>
