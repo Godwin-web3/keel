@@ -37,6 +37,7 @@ export default function App() {
   const [privateKey, setPrivateKey] = useState("");
   const [connected, setConnected] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
   const ticketRef = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -106,7 +107,7 @@ export default function App() {
     }
   }
 
-  async function connectAndLoad(net: NetworkName, key?: string) {
+  async function connectAndLoad(net: NetworkName, key?: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
     try {
@@ -117,12 +118,14 @@ export default function App() {
       setMarkets(rows);
       setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
       setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
+      return true;
     } catch (err) {
       setConnected(false);
       setMessage({
         kind: "error",
         text: err instanceof Error ? err.message : String(err),
       });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -248,9 +251,14 @@ export default function App() {
           <span className="mark">K</span>
           Keel
         </button>
-        <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
-          View source
-        </a>
+        <div className="nav-actions">
+          <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
+            {signedIn ? maskKey(privateKey) : "Connect Wallet"}
+          </button>
+          <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
+            View source
+          </a>
+        </div>
       </nav>
       <header className="top">
         <div className="brand">
@@ -260,56 +268,72 @@ export default function App() {
             after it settles to collect what you won.
           </p>
         </div>
-        <div className="session">
-          <label>Network</label>
-          <div className="row">
-            <select
-              value={network}
-              onChange={(e) => onNetworkChange(e.target.value as NetworkName)}
-              disabled={signedIn || busy}
-            >
-              <option value="shannon">Test network (practice money)</option>
-              <option value="mainnet">Somnia mainnet (real money)</option>
-            </select>
-          </div>
-          <label>Wallet key (only needed to bet — browsing is free)</label>
-          <div className="row">
-            <input
-              type="password"
-              placeholder="0x... a spending key, never your main wallet"
-              value={privateKey}
-              onChange={(e) => setPrivateKey(e.target.value)}
-              disabled={signedIn}
-              autoComplete="off"
-            />
-          </div>
-          <div className="row">
-            <button
-              onClick={() => void connectAndLoad(network, privateKey.trim() || undefined)}
-              disabled={busy || signedIn || !privateKey.trim()}
-            >
-              {busy ? "Connecting..." : signedIn ? "Connected" : "Connect wallet to bet"}
-            </button>
-            <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
-              Refresh
-            </button>
-            {signedIn && (
-              <button className="ghost" onClick={onDisconnect}>
-                Disconnect
+      </header>
+
+      {walletOpen && (
+        <div className="wallet-backdrop" onClick={() => setWalletOpen(false)}>
+          <div className="wallet-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="wallet-sheet-head">
+              <h2>Wallet</h2>
+              <button className="ghost" onClick={() => setWalletOpen(false)}>
+                Close
               </button>
-            )}
-          </div>
-          <div className="muted">
-            {signedIn
-              ? `Connected · ${maskKey(privateKey)}`
-              : connected
-                ? "Just browsing — connect a wallet above to place bets."
-                : busy
-                  ? "Loading markets..."
-                  : "You can look around for free. Betting needs a wallet key."}
+            </div>
+            <label>Network</label>
+            <div className="row">
+              <select
+                value={network}
+                onChange={(e) => onNetworkChange(e.target.value as NetworkName)}
+                disabled={signedIn || busy}
+              >
+                <option value="shannon">Test network (practice money)</option>
+                <option value="mainnet">Somnia mainnet (real money)</option>
+              </select>
+            </div>
+            <label>Wallet key (only needed to bet — browsing is free)</label>
+            <div className="row">
+              <input
+                type="password"
+                placeholder="0x... a spending key, never your main wallet"
+                value={privateKey}
+                onChange={(e) => setPrivateKey(e.target.value)}
+                disabled={signedIn}
+                autoComplete="off"
+              />
+            </div>
+            <div className="row">
+              <button
+                onClick={() => {
+                  void (async () => {
+                    const ok = await connectAndLoad(network, privateKey.trim() || undefined);
+                    if (ok && privateKey.trim()) setWalletOpen(false);
+                  })();
+                }}
+                disabled={busy || signedIn || !privateKey.trim()}
+              >
+                {busy ? "Connecting..." : signedIn ? "Connected" : "Connect wallet to bet"}
+              </button>
+              <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
+                Refresh
+              </button>
+              {signedIn && (
+                <button className="ghost" onClick={onDisconnect}>
+                  Disconnect
+                </button>
+              )}
+            </div>
+            <div className="muted">
+              {signedIn
+                ? `Connected · ${maskKey(privateKey)}`
+                : connected
+                  ? "Just browsing — connect a wallet above to place bets."
+                  : busy
+                    ? "Loading markets..."
+                    : "You can look around for free. Betting needs a wallet key."}
+            </div>
           </div>
         </div>
-      </header>
+      )}
 
       {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
 

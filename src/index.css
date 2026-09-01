@@ -189,6 +189,12 @@ button:disabled {
   font-size: 14px;
 }
 
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .app-nav a.repo-link {
   font-size: 12px;
   color: var(--muted);
@@ -203,18 +209,33 @@ button:disabled {
   color: var(--accent);
 }
 
+.wallet-trigger {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+}
+
+.wallet-trigger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.wallet-trigger.signed-in {
+  color: var(--up);
+  background: var(--up-dim);
+  border-color: transparent;
+}
+
 .top {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  align-items: flex-start;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 24px;
-  margin-bottom: 24px;
+  padding-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .brand h1 {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
 }
 
@@ -222,20 +243,76 @@ button:disabled {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 14px;
-  max-width: 46ch;
+  max-width: 52ch;
   line-height: 1.5;
 }
 
-.session {
-  min-width: 340px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
-  padding: 16px;
+.wallet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 40;
+  animation: fadeIn 0.15s ease-out;
 }
 
-.session label {
+.wallet-sheet {
+  width: 100%;
+  max-width: 420px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+  animation: slideUp 0.2s ease-out;
+}
+
+.wallet-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.wallet-sheet-head h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+@media (min-width: 640px) {
+  .wallet-backdrop {
+    align-items: center;
+  }
+  .wallet-sheet {
+    border-radius: var(--radius-lg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.wallet-sheet label {
   display: block;
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -801,13 +878,9 @@ th {
 }
 
 @media (max-width: 900px) {
-  .top,
   .grid {
     grid-template-columns: 1fr;
     display: grid;
-  }
-  .session {
-    min-width: 0;
   }
   /* Cap the market list so the bet panel underneath is reachable without a
      separate long scroll — the list scrolls in its own box instead. */
