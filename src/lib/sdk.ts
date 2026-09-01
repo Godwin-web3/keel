@@ -140,10 +140,68 @@ function extractMarketId(market: any): string {
 }
 
 function extractExpiry(market: any): number {
-  const raw = market?.info?.expiry ?? market?.expiry ?? market?.expiresAt ?? 0;
+  const raw =
+    market?.info?.expiry ??
+    market?.expiry ??
+    market?.expiresAt ??
+    market?.endTime ??
+    market?.closeTime ??
+    market?.settleTime ??
+    market?.windowEnd ??
+    0;
   const n = Number(raw);
   if (n > 1e12) return Math.floor(n / 1000);
   return n;
+}
+
+// Real Event Contract symbols look like "BTC-0-12AUG26-1600/USDso#YES": asset,
+// series index, expiry date (DDMMMYY), expiry time (HHMM, UTC), then
+// collateral/outcome. The indexer's exact field name for this string isn't
+// documented, so we scan for it rather than trust one guessed key, and parse
+// the expiry straight out of it rather than a separate (also-unconfirmed)
+// timestamp field.
+const SYMBOL_RE = /^(BTC|ETH)-\d+-(\d{2})([A-Za-z]{3})(\d{2})-(\d{4})\//;
+const MONTHS: Record<string, number> = {
+  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+};
+
+function parseSymbolMeta(symbol: string): { asset: "BTC" | "ETH"; expirySec: number } | null {
+  const match = SYMBOL_RE.exec(symbol);
+  if (!match) return null;
+  const [, asset, dd, mon, yy, hhmm] = match;
+  const month = MONTHS[mon.toUpperCase()];
+  if (month === undefined) return null;
+  const ms = Date.UTC(2000 + Number(yy), month, Number(dd), Number(hhmm.slice(0, 2)), Number(hhmm.slice(2, 4)), 0);
+  if (!Number.isFinite(ms)) return null;
+  return { asset: asset.toUpperCase() as "BTC" | "ETH", expirySec: Math.floor(ms / 1000) };
+}
+
+function findSymbolLike(obj: unknown, depth = 0): string {
+  if (!obj || typeof obj !== "object" || depth > 1) return "";
+  for (const value of Object.values(obj as Record<string, unknown>)) {
+    if (typeof value === "string" && SYMBOL_RE.test(value)) return value;
+  }
+  for (const value of Object.values(obj as Record<string, unknown>)) {
+    if (value && typeof value === "object") {
+      const nested = findSymbolLike(value, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function resolveSymbolMeta(
+  market: any,
+  declaredSymbol: string,
+): { symbol: string; asset: WindowMarket["asset"]; expirySec: number } {
+  const symbol = SYMBOL_RE.test(declaredSymbol) ? declaredSymbol : findSymbolLike(market) || declaredSymbol;
+  const meta = parseSymbolMeta(symbol);
+  return {
+    symbol: symbol || declaredSymbol,
+    asset: meta?.asset ?? detectAsset(symbol || declaredSymbol),
+    expirySec: meta?.expirySec ?? extractExpiry(market) ?? 0,
+  };
 }
 
 export async function listWindows(): Promise<WindowMarket[]> {
@@ -170,15 +228,15 @@ export async function listWindows(): Promise<WindowMarket[]> {
       } catch {
         /* indexer row still useful */
       }
-      const expirySec = extractExpiry(m);
+      const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
+      const { symbol, asset, expirySec } = resolveSymbolMeta(m, declaredSymbol);
       const secondsLeft = expirySec ? expirySec - now : 0;
-      const symbol = String(m.symbol || m.upSymbol || m.yesSymbol || marketId);
-      const book = await safeBook(symbol);
+      const book = await safeBook(symbol || marketId);
       out.push({
         marketId,
-        symbol,
-        upSymbol: symbol,
-        asset: detectAsset(symbol),
+        symbol: symbol || marketId,
+        upSymbol: symbol || marketId,
+        asset,
         timeframe: detectTimeframe(secondsLeft, symbol),
         expirySec,
         secondsLeft,
@@ -227,16 +285,16 @@ export async function listWindows(): Promise<WindowMarket[]> {
       statusCode = m.active ? 1 : 4;
     }
 
-    const expirySec = extractExpiry(m);
+    const { symbol, asset, expirySec } = resolveSymbolMeta(m, upSymbol);
     const secondsLeft = expirySec ? expirySec - now : 0;
-    const book = await safeBook(upSymbol);
+    const book = await safeBook(symbol);
 
     out.push({
       marketId,
-      symbol: upSymbol,
-      upSymbol,
-      asset: detectAsset(upSymbol),
-      timeframe: detectTimeframe(secondsLeft, upSymbol),
+      symbol,
+      upSymbol: symbol,
+      asset,
+      timeframe: detectTimeframe(secondsLeft, symbol),
       expirySec,
       secondsLeft,
       status: statusFromCode(statusCode),
