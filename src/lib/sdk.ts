@@ -28,6 +28,31 @@ type PortfolioPositionShape = {
   balance: string;
 };
 
+type CandleShape = {
+  bucketStart: string;
+  openPrice: string;
+  high: string;
+  low: string;
+  closePrice: string;
+  tradeCount: number;
+};
+
+type FillShape = {
+  quoteQuantity: string;
+  taker: string | null;
+  takerOrder: { owner: string; side: string | null } | null;
+};
+
+type PastMarketShape = {
+  marketId?: string;
+  id?: string;
+  poolAddress?: string;
+  quoteDecimals?: number;
+  voided?: boolean;
+  winningOutcome?: number | null;
+  asset?: string;
+};
+
 type Exchange = {
   loadMarkets: (force?: boolean) => Promise<Record<string, any>>;
   fetchOrderBook: (symbol: string, depth?: number) => Promise<any>;
@@ -55,6 +80,13 @@ type Exchange = {
     getOutcomeBalance?: (p: { outcomeToken: `0x${string}`; account: `0x${string}`; id: bigint }) => Promise<bigint>;
     getPortfolio?: (account: string, opts?: { tradesLimit?: number }) => Promise<{ positions: PortfolioPositionShape[] }>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
+    getCandles?: (
+      pool: string,
+      intervalSeconds: number,
+      opts?: { limit?: number; from?: number; to?: number },
+    ) => Promise<CandleShape[]>;
+    getFills?: (pool: string, opts?: { limit?: number; offset?: number }) => Promise<FillShape[]>;
+    listPastBinaryMarkets?: (opts?: { limit?: number }) => Promise<PastMarketShape[]>;
   };
   trader?: {
     redeem?: (args: {
@@ -744,4 +776,95 @@ export function mergePositions(
     ...extra.claimable.filter((p) => !claimableKeys.has(`${p.marketId}:${p.side}`)),
   ];
   return { open, claimable };
+}
+
+// ---------------- probability chart ----------------
+
+export type ProbabilityPoint = { t: number; probUp: number };
+
+/**
+ * The market's own trade tape, bucketed into candles by the indexer — read as
+ * an implied Up-probability history (a binary market's price IS the YES/Up
+ * probability, 0..1). Best-effort: an unreachable indexer or a market with no
+ * fills yet returns an empty array rather than throwing, so a quiet chart is
+ * never a crash.
+ */
+export async function getMarketProbabilityHistory(
+  market: WindowMarket,
+  opts: { limit?: number; intervalSeconds?: number } = {},
+): Promise<ProbabilityPoint[]> {
+  if (!exchange?.client.getCandles) return [];
+  const raw = market.raw as Record<string, unknown> | undefined;
+  const pool = String(raw?.poolAddress ?? raw?.pool ?? "");
+  if (!pool || !pool.startsWith("0x")) return [];
+  const quoteDecimals = Number(raw?.quoteDecimals ?? 6);
+  try {
+    const candles = await exchange.client.getCandles(pool, opts.intervalSeconds ?? 60, { limit: opts.limit ?? 60 });
+    return candles
+      .map((c) => ({
+        t: Number(c.bucketStart) * 1000,
+        probUp: Math.min(1, Math.max(0, Number(c.closePrice) / 10 ** quoteDecimals)),
+      }))
+      .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.probUp));
+  } catch {
+    return [];
+  }
+}
+
+// ---------------- recent-winners leaderboard ----------------
+
+export type LeaderboardEntry = { address: string; wins: number; volumeWon: number };
+
+/**
+ * A best-effort "top winning stakes" board built from real on-chain fills —
+ * there's no indexed cross-account redemption/PnL table to read directly, so
+ * this reconstructs it: for each of the last `marketLimit` settled markets,
+ * pull its fill tape and credit whoever bought onto the side that ended up
+ * winning. Not a full PnL leaderboard (a wallet's losing markets aren't
+ * netted out) — presented as "recent winning activity", not final standings.
+ * Bounded and best-effort: any failure (or an SDK build without these reads)
+ * returns an empty list rather than blocking the rest of the UI.
+ */
+export async function getRecentLeaderboard(
+  opts: { marketLimit?: number; topN?: number } = {},
+): Promise<LeaderboardEntry[]> {
+  if (!exchange?.client.listPastBinaryMarkets || !exchange.client.getFills) return [];
+  try {
+    const past = await exchange.client.listPastBinaryMarkets({ limit: opts.marketLimit ?? 10 });
+    const totals = new Map<string, { wins: number; volumeWon: number }>();
+
+    for (const m of past) {
+      if (m.voided || m.winningOutcome === null || m.winningOutcome === undefined) continue;
+      const pool = String(m.poolAddress ?? "");
+      if (!pool || !pool.startsWith("0x")) continue;
+      const quoteDecimals = Number(m.quoteDecimals ?? 6);
+      const winningSide: "BUY_YES" | "BUY_NO" = m.winningOutcome === 0 ? "BUY_YES" : "BUY_NO";
+
+      let fills: FillShape[] = [];
+      try {
+        fills = await exchange.client.getFills(pool, { limit: 200 });
+      } catch {
+        continue;
+      }
+
+      for (const f of fills) {
+        if (f.takerOrder?.side !== winningSide) continue;
+        const owner = f.takerOrder?.owner ?? f.taker;
+        if (!owner) continue;
+        const quote = Number(f.quoteQuantity ?? 0) / 10 ** quoteDecimals;
+        if (!Number.isFinite(quote)) continue;
+        const entry = totals.get(owner) ?? { wins: 0, volumeWon: 0 };
+        entry.wins += 1;
+        entry.volumeWon += quote;
+        totals.set(owner, entry);
+      }
+    }
+
+    return [...totals.entries()]
+      .map(([address, v]) => ({ address, ...v }))
+      .sort((a, b) => b.volumeWon - a.volumeWon)
+      .slice(0, opts.topN ?? 5);
+  } catch {
+    return [];
+  }
 }

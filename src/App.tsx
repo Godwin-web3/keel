@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Claimable, JournalRow, NetworkName, OpenPosition, Side, WindowMarket } from "./lib/types";
+import type { Claimable, JournalRow, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./lib/types";
 import {
   ASSET_ICON,
   detectAsset,
@@ -20,16 +20,23 @@ import {
   discoverOnchainPositions,
   getAccountAddress,
   getAuthorizedInjectedAddress,
+  getMarketProbabilityHistory,
+  getRecentLeaderboard,
   hasInjectedWallet,
   listWindows,
   maskKey,
   mergePositions,
   placeStake,
   redeemMarket,
+  type LeaderboardEntry,
+  type ProbabilityPoint,
 } from "./lib/sdk";
 import Landing from "./Landing";
+import CountdownRing from "./CountdownRing";
+import PriceChart from "./PriceChart";
 
-type Tab = "markets" | "desk";
+type Tab = "markets" | "desk" | "leaderboard";
+type HistoryFilter = "all" | "won" | "lost" | "collected";
 
 const DEFAULT_STAKE = 10;
 const APP_HASH = "#/app";
@@ -39,6 +46,21 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   roll: "Rolled",
   note: "Note",
 };
+
+// Windows this long or shorter render a countdown ring — a 1h+ window ticking
+// down visually all session is just noise, not urgency.
+const RING_MAX_SECONDS = 20 * 60;
+
+function timeframeSeconds(timeframe: string): number {
+  if (timeframe.endsWith("h")) return Number(timeframe.slice(0, -1)) * 3600;
+  if (timeframe.endsWith("m")) return Number(timeframe.slice(0, -1)) * 60;
+  return RING_MAX_SECONDS;
+}
+
+function slotLabel(index: number, status: MarketStatus): string {
+  if (status === "trading") return "Live";
+  return index === 0 ? "Next" : "Later";
+}
 
 function isAppRoute(): boolean {
   return window.location.hash === APP_HASH;
@@ -69,6 +91,11 @@ export default function App() {
   const [rollAfterRedeem, setRollAfterRedeem] = useState(true);
   const [autoClaim, setAutoClaim] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [pendingBet, setPendingBet] = useState<Side | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [chartPoints, setChartPoints] = useState<ProbabilityPoint[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
+  const [leaderboardBusy, setLeaderboardBusy] = useState(false);
   const refreshingRef = useRef(false);
   const autoClaimingRef = useRef<Set<string>>(new Set());
 
@@ -118,6 +145,57 @@ export default function App() {
 
   const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
   const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
+
+  // Group windows by asset+cadence and order soonest-first, so each group can
+  // render as a Live/Next/Later round carousel instead of one flat list.
+  const roundGroups = useMemo(() => {
+    const byKey = new Map<string, WindowMarket[]>();
+    for (const m of markets) {
+      const key = `${m.asset}:${m.timeframe}`;
+      const arr = byKey.get(key) ?? [];
+      arr.push(m);
+      byKey.set(key, arr);
+    }
+    return [...byKey.entries()]
+      .map(([key, list]) => {
+        const rounds = [...list].sort((a, b) => a.expirySec - b.expirySec);
+        return { key, asset: rounds[0].asset, timeframe: rounds[0].timeframe, rounds };
+      })
+      .sort((a, b) => a.rounds[0].expirySec - b.rounds[0].expirySec);
+  }, [markets]);
+
+  // Best-effort probability chart for whichever window is selected — refetched
+  // whenever the selection changes. Never blocks the ticket panel on failure.
+  useEffect(() => {
+    if (!selected) {
+      setChartPoints([]);
+      return;
+    }
+    let cancelled = false;
+    void getMarketProbabilityHistory(selected).then((points) => {
+      if (!cancelled) setChartPoints(points);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.marketId]);
+
+  const filteredJournal = useMemo(() => {
+    if (historyFilter === "all") return journal;
+    if (historyFilter === "collected") return journal.filter((r) => r.kind === "redeem");
+    const wantResult = historyFilter === "won" ? "win" : "loss";
+    return journal.filter((r) => r.kind === "redeem" && r.result === wantResult);
+  }, [journal, historyFilter]);
+
+  async function loadLeaderboard() {
+    setLeaderboardBusy(true);
+    try {
+      const rows = await getRecentLeaderboard();
+      setLeaderboard(rows);
+    } finally {
+      setLeaderboardBusy(false);
+    }
+  }
   const { open, claimable } = useMemo(() => {
     const merged = mergePositions(derivePositions(markets, journal), onchainPositions);
     // derivePositions already excludes a journal-known trade whose market has
@@ -569,6 +647,48 @@ export default function App() {
         </div>
       )}
 
+      {pendingBet && selected && (
+        <div className="confirm-backdrop" onClick={() => setPendingBet(null)}>
+          <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
+            <h2>Confirm your bet</h2>
+            <p className="muted" style={{ marginBottom: 14 }}>
+              {selected.asset} {selected.timeframe} ·{" "}
+              <span className={`confirm-side ${pendingBet}`}>{pendingBet === "up" ? "Up" : "Down"}</span>
+            </p>
+            <div className="ticket-math">
+              <div>
+                <span>You're staking</span>
+                {formatUsd(stake)}
+              </div>
+              <div>
+                <span>You get back if right</span>
+                {formatUsd(quoteTicket(pendingBet, stake, selected.impliedUp).redeemIfWin)}
+              </div>
+              <div>
+                <span>Most you can lose</span>
+                {formatUsd(stake)}
+              </div>
+            </div>
+            <div className="actions" style={{ marginTop: 16 }}>
+              <button
+                className={pendingBet}
+                disabled={busy}
+                onClick={() => {
+                  const side = pendingBet;
+                  setPendingBet(null);
+                  void onTrade(side);
+                }}
+              >
+                Confirm {pendingBet === "up" ? "Up" : "Down"}
+              </button>
+              <button className="ghost" onClick={() => setPendingBet(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
 
       <div className="tabs">
@@ -577,6 +697,15 @@ export default function App() {
         </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
           My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
+        </button>
+        <button
+          className={tab === "leaderboard" ? "active" : ""}
+          onClick={() => {
+            setTab("leaderboard");
+            if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
+          }}
+        >
+          Leaderboard
         </button>
       </div>
 
@@ -590,36 +719,47 @@ export default function App() {
               <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
             )}
             <div className="market-list">
-              {markets.map((m) => {
-                const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
-                const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
-                return (
-                  <article
-                    key={m.marketId}
-                    className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                    onClick={() => selectMarket(m.marketId)}
-                  >
-                    <div className="market-top">
-                      <strong className="market-name">
-                        <span className="asset-icon">{ASSET_ICON[m.asset]}</span>
-                        {m.asset} <span className="muted">· {m.timeframe}</span>
-                      </strong>
-                      <span className={`badge ${m.status}`}>{STATUS_LABEL[m.status]}</span>
-                    </div>
-                    <div className="odds-bar">
-                      <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
-                      <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
-                    </div>
-                    <div className="odds-labels">
-                      <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
-                      <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
-                    </div>
-                    <div className="muted" style={{ marginTop: 8 }}>
-                      {formatCloseLabel(m.expirySec, secondsLeft)}
-                    </div>
-                  </article>
-                );
-              })}
+              {roundGroups.map((group) => (
+                <div key={group.key} className="round-group">
+                  <div className="round-group-head">
+                    <span className="asset-icon">{ASSET_ICON[group.asset]}</span>
+                    {group.asset} · {group.timeframe}
+                  </div>
+                  <div className="round-track">
+                    {group.rounds.slice(0, 4).map((m, idx) => {
+                      const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
+                      const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
+                      const slot = slotLabel(idx, m.status);
+                      const totalSeconds = timeframeSeconds(m.timeframe);
+                      return (
+                        <article
+                          key={m.marketId}
+                          className={`round-card ${slot === "Live" ? "live" : ""} ${selected?.marketId === m.marketId ? "selected" : ""}`}
+                          onClick={() => selectMarket(m.marketId)}
+                        >
+                          <div className="market-top">
+                            <span className="round-slot">{slot}</span>
+                            {secondsLeft > 0 && secondsLeft <= totalSeconds && (
+                              <CountdownRing secondsLeft={secondsLeft} totalSeconds={totalSeconds} size={26} />
+                            )}
+                          </div>
+                          <div className="odds-bar">
+                            <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
+                            <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
+                          </div>
+                          <div className="odds-labels">
+                            <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
+                            <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
+                          </div>
+                          <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                            {formatCloseLabel(m.expirySec, secondsLeft)}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
 
@@ -629,6 +769,7 @@ export default function App() {
             {selected && quote && (
               <>
                 <p className="plain">{plainLanguage(selected, stake, "up")}</p>
+                <PriceChart points={chartPoints} />
                 <label className="stake-label">
                   How much do you want to bet?
                   <div className="stake-input">
@@ -660,14 +801,14 @@ export default function App() {
                   <button
                     className="up"
                     disabled={busy || !signedIn || selected.status !== "trading"}
-                    onClick={() => void onTrade("up")}
+                    onClick={() => setPendingBet("up")}
                   >
                     Bet Up
                   </button>
                   <button
                     className="down"
                     disabled={busy || !signedIn || selected.status !== "trading"}
-                    onClick={() => void onTrade("down")}
+                    onClick={() => setPendingBet("down")}
                   >
                     Bet Down
                   </button>
@@ -781,6 +922,13 @@ export default function App() {
                 <strong>{stats.winRate === null ? "—" : `${stats.winRate}%`}</strong>
               </div>
             </div>
+            <div className="filter-chips">
+              {(["all", "won", "lost", "collected"] as HistoryFilter[]).map((f) => (
+                <button key={f} className={historyFilter === f ? "active" : ""} onClick={() => setHistoryFilter(f)}>
+                  {f === "all" ? "All" : f === "won" ? "Won" : f === "lost" ? "Lost" : "Collected"}
+                </button>
+              ))}
+            </div>
             <table>
               <thead>
                 <tr>
@@ -791,14 +939,16 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {journal.length === 0 && (
+                {filteredJournal.length === 0 && (
                   <tr>
                     <td colSpan={4} className="muted">
-                      Nothing yet. Your bets, claims, and rolls show up here, saved only on this device.
+                      {journal.length === 0
+                        ? "Nothing yet. Your bets, claims, and rolls show up here, saved only on this device."
+                        : "Nothing matches this filter."}
                     </td>
                   </tr>
                 )}
-                {journal.map((row) => (
+                {filteredJournal.map((row) => (
                   <tr key={row.id}>
                     <td>{new Date(row.at).toLocaleString()}</td>
                     <td>{KIND_LABEL[row.kind]}</td>
@@ -820,6 +970,37 @@ export default function App() {
                 ))}
               </tbody>
             </table>
+          </section>
+        </div>
+      )}
+
+      {tab === "leaderboard" && (
+        <div className="grid">
+          <section className="card">
+            <h2>Recent winning stakes</h2>
+            <p className="muted" style={{ marginBottom: 14 }}>
+              Built from real fills on the last few settled windows — the wallets who bought onto the side that ended
+              up winning. Not a full profit ranking (losing windows aren't netted out), just recent activity.
+            </p>
+            {leaderboardBusy && <p className="muted">Reading recent settled windows...</p>}
+            {!leaderboardBusy && leaderboard !== null && leaderboard.length === 0 && (
+              <p className="muted">No winning fills found in the recent settled windows.</p>
+            )}
+            {!leaderboardBusy &&
+              leaderboard !== null &&
+              leaderboard.map((entry, i) => (
+                <div key={entry.address} className="leaderboard-row">
+                  <span className="leaderboard-rank">#{i + 1}</span>
+                  <span className="leaderboard-addr">{maskKey(entry.address)}</span>
+                  <span className="muted">{entry.wins} win{entry.wins === 1 ? "" : "s"}</span>
+                  <span className="leaderboard-amount">${formatUsd(entry.volumeWon)}</span>
+                </div>
+              ))}
+            <div className="actions" style={{ marginTop: 14 }}>
+              <button className="ghost" disabled={leaderboardBusy} onClick={() => void loadLeaderboard()}>
+                Refresh
+              </button>
+            </div>
           </section>
         </div>
       )}

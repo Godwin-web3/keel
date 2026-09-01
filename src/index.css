@@ -1,28 +1,28 @@
 :root {
-  color-scheme: dark;
-  --bg: #08090b;
-  --bg-1: #0e1013;
-  --bg-2: #14171b;
-  --bg-3: #1b1f24;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #f1f2ee;
-  --text-dim: #c2c6c0;
-  --muted: #82897f;
-  --accent: #d6ff4a;
-  --accent-ink: #10130a;
-  --accent-dim: rgba(214, 255, 74, 0.12);
-  --up: #6ee7b7;
-  --up-dim: rgba(110, 231, 183, 0.12);
-  --down: #ff8577;
-  --down-dim: rgba(255, 133, 119, 0.12);
-  --warn: #ffcf6b;
-  --warn-dim: rgba(255, 207, 107, 0.12);
-  --radius-sm: 8px;
-  --radius: 14px;
-  --radius-lg: 24px;
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 48px -32px rgba(0, 0, 0, 0.7);
-  --font-display: "Space Grotesk", "Inter", "Segoe UI", sans-serif;
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #f2f2ef;
+  --line: #e5e5e1;
+  --line-strong: #d3d3ce;
+  --text: #0d0f12;
+  --text-dim: #4b4f54;
+  --muted: #7a7d82;
+  --accent: #1652f0;
+  --accent-ink: #ffffff;
+  --accent-dim: rgba(22, 82, 240, 0.08);
+  --up: #04a45c;
+  --up-dim: rgba(4, 164, 92, 0.09);
+  --down: #dc2626;
+  --down-dim: rgba(220, 38, 38, 0.08);
+  --warn: #b45309;
+  --warn-dim: rgba(180, 83, 9, 0.09);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow-card: 0 1px 2px rgba(15, 15, 15, 0.04);
+  --font-display: "Inter", "Segoe UI", sans-serif;
   --font-body: "Inter", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   background: var(--bg);
@@ -42,17 +42,14 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(1100px 560px at 12% -12%, rgba(214, 255, 74, 0.08), transparent 55%),
-    radial-gradient(900px 520px at 100% 0%, rgba(110, 231, 183, 0.06), transparent 50%),
-    var(--bg);
+  background: var(--bg);
 }
 
 h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
@@ -130,12 +127,12 @@ button.ghost:hover:not(:disabled) {
 
 button.up {
   background: var(--up);
-  color: #062017;
+  color: #ffffff;
 }
 
 button.down {
   background: var(--down);
-  color: #260c07;
+  color: #ffffff;
 }
 
 button:disabled {
@@ -708,13 +705,13 @@ th {
 }
 
 .banner.error {
-  border-color: rgba(255, 133, 119, 0.35);
+  border-color: rgba(220, 38, 38, 0.25);
   background: var(--down-dim);
-  color: #ffcfc7;
+  color: var(--down);
 }
 
 .banner.ok {
-  border-color: rgba(110, 231, 183, 0.3);
+  border-color: rgba(4, 164, 92, 0.25);
   background: var(--up-dim);
   color: var(--up);
 }
@@ -959,6 +956,220 @@ th {
 .landing-footer .links {
   display: flex;
   gap: 18px;
+}
+
+/* ---------- countdown ring ---------- */
+
+.countdown-ring {
+  flex: none;
+}
+
+.countdown-ring .ring-track {
+  stroke: var(--line);
+}
+
+.countdown-ring .ring-fill {
+  stroke: var(--up);
+  transition: stroke-dashoffset 1s linear;
+}
+
+.countdown-ring.urgent .ring-fill {
+  stroke: var(--down);
+}
+
+/* ---------- price chart ---------- */
+
+.price-chart {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  padding: 10px 12px;
+}
+
+.price-chart.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chart-mid {
+  stroke: var(--line-strong);
+}
+
+.chart-line.up {
+  stroke: var(--up);
+}
+
+.chart-line.down {
+  stroke: var(--down);
+}
+
+.chart-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.chart-legend strong {
+  font-family: var(--font-mono);
+}
+
+/* ---------- round carousel ---------- */
+
+.round-group {
+  margin-bottom: 18px;
+}
+
+.round-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.round-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.round-card {
+  flex: none;
+  width: 190px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 13px;
+  cursor: pointer;
+  background: var(--bg-3);
+  transition: border-color 0.15s ease;
+}
+
+.round-card:hover {
+  border-color: var(--line-strong);
+}
+
+.round-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.round-card .round-slot {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.round-card.live .round-slot {
+  color: var(--up);
+}
+
+/* ---------- confirm modal ---------- */
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.confirm-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 22px;
+}
+
+.confirm-card h2 {
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+
+.confirm-card .confirm-side {
+  font-weight: 700;
+}
+
+.confirm-card .confirm-side.up {
+  color: var(--up);
+}
+
+.confirm-card .confirm-side.down {
+  color: var(--down);
+}
+
+/* ---------- history filters ---------- */
+
+.filter-chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-chips button {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-chips button.active {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+/* ---------- leaderboard ---------- */
+
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.leaderboard-row:last-child {
+  border-bottom: 0;
+}
+
+.leaderboard-rank {
+  width: 20px;
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.leaderboard-addr {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.leaderboard-amount {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--up);
 }
 
 @media (max-width: 900px) {
