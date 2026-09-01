@@ -809,6 +809,13 @@ th {
   .session {
     min-width: 0;
   }
+  /* Cap the market list so the bet panel underneath is reachable without a
+     separate long scroll — the list scrolls in its own box instead. */
+  .market-list {
+    max-height: 38vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   .feature-grid,
   .steps {
     grid-template-columns: 1fr;

@@ -331,39 +331,41 @@ export default function App() {
             {connected && markets.length === 0 && (
               <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
             )}
-            {markets.map((m) => {
-              const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
-              const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
-              return (
-                <article
-                  key={m.marketId}
-                  className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                  onClick={() => selectMarket(m.marketId)}
-                >
-                  <div className="market-top">
-                    <strong className="market-name">
-                      <span className="asset-icon">{ASSET_ICON[m.asset]}</span>
-                      {m.asset} <span className="muted">· {m.timeframe}</span>
-                    </strong>
-                    <span className={`badge ${m.status}`}>{STATUS_LABEL[m.status]}</span>
-                  </div>
-                  <div className="odds-bar">
-                    <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
-                    <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
-                  </div>
-                  <div className="odds-labels">
-                    <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
-                    <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
-                  </div>
-                  <div className="muted" style={{ marginTop: 8 }}>
-                    {formatCloseLabel(m.expirySec, secondsLeft)}
-                  </div>
-                </article>
-              );
-            })}
+            <div className="market-list">
+              {markets.map((m) => {
+                const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
+                const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
+                return (
+                  <article
+                    key={m.marketId}
+                    className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
+                    onClick={() => selectMarket(m.marketId)}
+                  >
+                    <div className="market-top">
+                      <strong className="market-name">
+                        <span className="asset-icon">{ASSET_ICON[m.asset]}</span>
+                        {m.asset} <span className="muted">· {m.timeframe}</span>
+                      </strong>
+                      <span className={`badge ${m.status}`}>{STATUS_LABEL[m.status]}</span>
+                    </div>
+                    <div className="odds-bar">
+                      <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
+                      <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
+                    </div>
+                    <div className="odds-labels">
+                      <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
+                      <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
+                    </div>
+                    <div className="muted" style={{ marginTop: 8 }}>
+                      {formatCloseLabel(m.expirySec, secondsLeft)}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </section>
 
-          <section className="card" ref={ticketRef}>
+          <section className="card ticket-panel" ref={ticketRef}>
             <h2>Place your bet</h2>
             {!selected && <p className="muted">Pick a window on the left.</p>}
             {selected && quote && (
