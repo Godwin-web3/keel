@@ -34,7 +34,7 @@ import {
 import Landing from "./Landing";
 import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
-import { CoinsIcon, ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
+import { ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
 
 type Tab = "markets" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
@@ -262,7 +262,7 @@ export default function App() {
         }
       }
     }
-    return { wagered, won, winRate: settled > 0 ? Math.round((wins / settled) * 100) : null };
+    return { wagered, won, wins, settled, winRate: settled > 0 ? Math.round((wins / settled) * 100) : null };
   }, [journal]);
 
   // Best-effort: scan the connected account's actual on-chain outcome-token
@@ -555,7 +555,7 @@ export default function App() {
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
             <button className="unclaimed-pill" onClick={() => setTab("desk")}>
-              <CoinsIcon /> ${formatUsd(totalUnclaimed)} to claim
+              ${formatUsd(totalUnclaimed)} to claim
             </button>
           )}
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
@@ -1000,18 +1000,20 @@ export default function App() {
           </section>
           <section className="card">
             <h2>Activity</h2>
-            <div className="stats-strip">
-              <div className="stat-tile">
-                <span>Total wagered</span>
-                <strong>${formatUsd(stats.wagered)}</strong>
-              </div>
-              <div className="stat-tile">
-                <span>Total won</span>
-                <strong>${formatUsd(stats.won)}</strong>
-              </div>
-              <div className="stat-tile">
-                <span>Win rate</span>
+            <div className="edge-readout">
+              <div className="edge-headline">
                 <strong>{stats.winRate === null ? "—" : `${stats.winRate}%`}</strong>
+                <span>
+                  win rate{stats.settled > 0 ? ` · ${stats.wins} of ${stats.settled} settled bets` : " · nothing settled yet"}
+                </span>
+              </div>
+              <div className="edge-sub">
+                <span>
+                  Wagered <strong>${formatUsd(stats.wagered)}</strong>
+                </span>
+                <span>
+                  Won <strong>${formatUsd(stats.won)}</strong>
+                </span>
               </div>
             </div>
             <div className="filter-chips">

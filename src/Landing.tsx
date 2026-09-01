@@ -9,8 +9,8 @@ const DEMO_CHART: ProbabilityPoint[] = [0.5, 0.53, 0.58, 0.55, 0.6, 0.64, 0.61, 
 
 const BENEFITS = [
   {
-    title: "Windows that settle fast",
-    body: "BTC and ETH windows close in as little as 5 minutes. Call it, and find out before your coffee's cold.",
+    title: "Windows that settle fast — or don't",
+    body: "BTC and ETH windows run from 5 minutes to a full hour. Same interface either way: pick the pace you want.",
   },
   {
     title: "Know your numbers upfront",
@@ -47,50 +47,31 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
       </nav>
 
       <header className="hero">
-        <span className="eyebrow">Live on Somnia</span>
-        <h1>
-          Call it. <span className="accent">Up or Down.</span>
-        </h1>
-        <p>
-          Bitcoin and Ethereum price windows that settle in minutes. Pick a side, watch it move, collect if you're
-          right.
-        </p>
-        <div className="hero-actions">
-          <button onClick={onLaunch}>Launch app — free to browse</button>
-        </div>
-        <p className="hero-note">No sign-up · connect a wallet only when you're ready to bet</p>
-      </header>
-
-      <p className="section-label">What it looks like</p>
-      <div className="demo-grid">
-        <div className="card demo-market">
-          <div className="round-group-head">
-            <span className="asset-icon">₿</span>
-            BTC · 5m
+        <div className="hero-copy">
+          <span className="kicker">Live on Somnia</span>
+          <h1>
+            Call it. <span className="accent">Up or Down.</span>
+          </h1>
+          <p>
+            Bitcoin and Ethereum price windows that settle in minutes, not months. Pick a side, watch it move,
+            collect if you're right.
+          </p>
+          <div className="hero-actions">
+            <button onClick={onLaunch}>Launch app — free to browse</button>
           </div>
-          <article className="round-card live demo-card">
-            <div className="market-top">
-              <span className="round-slot">Live</span>
-              <CountdownRing secondsLeft={134} totalSeconds={300} size={30} />
-            </div>
-            <div className="odds-bar">
-              <div className="odds-bar-up" style={{ width: "65%" }} />
-              <div className="odds-bar-down" style={{ width: "35%" }} />
-            </div>
-            <div className="odds-labels">
-              <span className="odds-up">Up 65%</span>
-              <span className="odds-down">Down 35%</span>
-            </div>
-            <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
-              Closes 2m 14s · 4:12 PM
-            </div>
-          </article>
+          <p className="hero-note">No sign-up · connect a wallet only when you're ready to bet</p>
         </div>
 
         <div className="card demo-ticket">
           <h2>Place your bet</h2>
           <p className="plain">BTC · Up or Down in 5m</p>
           <PriceChart points={DEMO_CHART} />
+          <div className="market-top" style={{ margin: "14px 0" }}>
+            <span className="round-slot" style={{ color: "var(--up)" }}>
+              Live
+            </span>
+            <CountdownRing secondsLeft={134} totalSeconds={300} size={26} />
+          </div>
           <div className="ticket-math">
             <div>
               <span>You win if Up</span>
@@ -114,24 +95,26 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
       <p className="section-label">Why it feels different</p>
-      <div className="feature-grid">
+      <div className="benefit-list">
         {BENEFITS.map((f, i) => (
-          <div className="feature-card" key={f.title}>
+          <div className="benefit-row" key={f.title}>
             <div className="num">0{i + 1}</div>
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
+            <div>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </div>
           </div>
         ))}
       </div>
 
       <p className="section-label">How it works</p>
-      <div className="steps">
+      <div className="step-flow">
         {STEPS.map((s, i) => (
           <div className="step" key={s.title}>
-            <div className="num">{i + 1}</div>
+            <div className="num">0{i + 1}</div>
             <h4>{s.title}</h4>
             <p>{s.body}</p>
           </div>
