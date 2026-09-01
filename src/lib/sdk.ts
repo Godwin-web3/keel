@@ -461,6 +461,8 @@ export function derivePositions(
       open.push({
         marketId: row.marketId,
         symbol: market?.symbol ?? row.marketId,
+        asset: market?.asset ?? "OTHER",
+        timeframe: market?.timeframe ?? "other",
         side,
         contracts,
         entryProb,
@@ -482,6 +484,8 @@ export function derivePositions(
       claimable.push({
         marketId: row.marketId,
         symbol: market?.symbol ?? row.marketId,
+        asset: market?.asset ?? "OTHER",
+        timeframe: market?.timeframe ?? "other",
         side,
         contracts,
         estimatedPayout,

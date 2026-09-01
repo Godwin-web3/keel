@@ -1,12 +1,18 @@
 import type { MarketStatus, Side, TicketQuote, WindowMarket } from "./types";
 
 export const STATUS_LABEL: Record<MarketStatus, string> = {
-  listed: "Listed",
-  trading: "Trading",
-  locked: "Locked",
-  resolved: "Resolved",
+  listed: "Coming up",
+  trading: "Open",
+  locked: "Closing",
+  resolved: "Settled",
   voided: "Voided",
   unknown: "Unknown",
+};
+
+export const ASSET_ICON: Record<WindowMarket["asset"], string> = {
+  BTC: "₿",
+  ETH: "Ξ",
+  OTHER: "◆",
 };
 
 export function statusFromCode(code: number): MarketStatus {
@@ -45,6 +51,13 @@ export function formatCountdown(secondsLeft: number): string {
   return `${sign}${m}m ${String(sec).padStart(2, "0")}s`;
 }
 
+export function formatCloseLabel(expirySec: number, secondsLeft: number): string {
+  if (!expirySec) return "Closing time unknown";
+  const when = new Date(expirySec * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (secondsLeft > 0) return `Closes ${formatCountdown(secondsLeft)} · ${when}`;
+  return `Closed ${when}`;
+}
+
 export function formatProb(p: number | null): string {
   if (p === null || !Number.isFinite(p)) return "—";
   return `${Math.round(p * 100)}%`;
@@ -75,11 +88,11 @@ export function quoteTicket(side: Side, stake: number, impliedUp: number | null)
 
 export function plainLanguage(market: WindowMarket, stake: number, side: Side): string {
   const p = market.impliedUp;
-  const upPct = p === null ? "an unknown" : `${Math.round(p * 100)}%`;
+  const upPct = p === null ? "an unclear" : `${Math.round(p * 100)}%`;
   const q = quoteTicket(side, stake, p);
-  const asset = market.asset === "OTHER" ? "this market" : market.asset;
-  const win = side === "up" ? "finishes at or above the window open" : "finishes below the window open";
-  return `${asset} · ${market.timeframe} · ${formatCountdown(market.secondsLeft)} left · the book prices a ${upPct} chance Up wins · ${side === "up" ? "Up" : "Down"}: stake ${formatUsd(stake)} to redeem about ${formatUsd(q.redeemIfWin)} if ${asset} ${win}. Maximum loss is the stake.`;
+  const asset = market.asset === "OTHER" ? "This market" : market.asset;
+  const sideWord = side === "up" ? "Up" : "Down";
+  return `${asset} looks like ${upPct} likely to finish Up. Bet ${sideWord}: put in ${formatUsd(stake)}, and if you're right you get about ${formatUsd(q.redeemIfWin)} back. If you're wrong, you lose the ${formatUsd(stake)} — never more.`;
 }
 
 export function shorten(id: string, size = 6): string {

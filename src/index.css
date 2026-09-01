@@ -318,9 +318,81 @@ button:disabled {
 .market-top {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   font-size: 13px;
+}
+
+.market-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.market-name .muted {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.asset-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--accent);
+  flex: none;
+}
+
+.odds-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-1);
+  margin: 12px 0 6px;
+}
+
+.odds-bar-up {
+  background: var(--up);
+  transition: width 0.2s ease;
+}
+
+.odds-bar-down {
+  background: var(--down);
+  transition: width 0.2s ease;
+}
+
+.odds-labels {
+  display: flex;
+  justify-content: space-between;
   font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.odds-up {
+  color: var(--up);
+}
+
+.odds-down {
+  color: var(--down);
+}
+
+.up {
+  color: var(--up);
+}
+
+.down {
+  color: var(--down);
 }
 
 .badge {
@@ -360,9 +432,52 @@ button:disabled {
   color: var(--text-dim);
 }
 
+.stake-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 18px 0 0;
+}
+
+.stake-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 14px;
+  margin-top: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.stake-input:focus-within {
+  border-color: var(--accent);
+}
+
+.stake-input span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 18px;
+}
+
+.stake-input input {
+  border: 0;
+  background: transparent;
+  padding: 10px 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.stake-input input:focus {
+  outline: none;
+  border: 0;
+}
+
 .ticket-math {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   font-size: 13px;
   margin: 16px 0;

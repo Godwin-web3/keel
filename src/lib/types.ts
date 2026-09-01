@@ -36,6 +36,8 @@ export type TicketQuote = {
 export type OpenPosition = {
   marketId: string;
   symbol: string;
+  asset: WindowMarket["asset"];
+  timeframe: WindowMarket["timeframe"];
   side: Side;
   contracts: number;
   entryProb: number;
@@ -46,6 +48,8 @@ export type OpenPosition = {
 export type Claimable = {
   marketId: string;
   symbol: string;
+  asset: WindowMarket["asset"];
+  timeframe: WindowMarket["timeframe"];
   side: Side;
   contracts: number;
   estimatedPayout: number;

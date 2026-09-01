@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { JournalRow, NetworkName, Side, WindowMarket } from "./lib/types";
-import { formatCountdown, formatProb, formatUsd, plainLanguage, quoteTicket, shorten, STATUS_LABEL } from "./lib/format";
+import {
+  ASSET_ICON,
+  detectAsset,
+  formatCloseLabel,
+  formatProb,
+  formatUsd,
+  plainLanguage,
+  quoteTicket,
+  shorten,
+  STATUS_LABEL,
+} from "./lib/format";
 import { appendJournal, loadJournal } from "./lib/journal";
 import { connectExchange, derivePositions, disconnectExchange, listWindows, maskKey, placeStake, redeemMarket } from "./lib/sdk";
 import Landing from "./Landing";
@@ -9,6 +19,12 @@ type Tab = "markets" | "desk";
 
 const DEFAULT_STAKE = 10;
 const APP_HASH = "#/app";
+const KIND_LABEL: Record<JournalRow["kind"], string> = {
+  trade: "Bet placed",
+  redeem: "Claimed",
+  roll: "Rolled",
+  note: "Note",
+};
 
 function isAppRoute(): boolean {
   return window.location.hash === APP_HASH;
@@ -27,9 +43,15 @@ export default function App() {
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [journal, setJournal] = useState<JournalRow[]>([]);
   const [rollAfterRedeem, setRollAfterRedeem] = useState(true);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setJournal(loadJournal());
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -65,7 +87,7 @@ export default function App() {
       const rows = await listWindows();
       setMarkets(rows);
       if (!selectedId && rows[0]) setSelectedId(rows[0].marketId);
-      setMessage({ kind: "ok", text: `Loaded ${rows.length} Event Contract window${rows.length === 1 ? "" : "s"}.` });
+      setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -101,7 +123,7 @@ export default function App() {
     disconnectExchange();
     setConnected(false);
     setMarkets([]);
-    setMessage({ kind: "ok", text: "Disconnected. The key is not stored on a server." });
+    setMessage({ kind: "ok", text: "Disconnected. Your wallet key was never saved anywhere." });
   }
 
   async function onTrade(side: Side) {
@@ -124,7 +146,7 @@ export default function App() {
       });
       setJournal(rows);
       setTab("desk");
-      setMessage({ kind: "ok", text: `Order submitted${result.hash ? ` - ${shorten(result.hash)}` : ""}.` });
+      setMessage({ kind: "ok", text: `Bet placed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -139,12 +161,12 @@ export default function App() {
       const result = await redeemMarket(marketId, side);
       const note =
         result.result === "void"
-          ? "Voided window - stake returned"
+          ? "Window cancelled - your bet was returned"
           : result.result === "win"
-            ? "Redeemed settled Event Contract"
+            ? "You won - claimed"
             : result.result === "loss"
-              ? "Redeemed losing position"
-              : "Redeemed - outcome unconfirmed";
+              ? "You lost this one - claimed"
+              : "Claimed - outcome unconfirmed";
       appendJournal({
         kind: "redeem",
         marketId,
@@ -161,14 +183,14 @@ export default function App() {
             kind: "roll",
             marketId: next.marketId,
             symbol: next.symbol,
-            note: `Ready to roll into ${next.asset} ${next.timeframe}`,
+            note: `Lined up ${next.asset} ${next.timeframe}`,
           });
           setSelectedId(next.marketId);
           setTab("markets");
           setJournal(loadJournal());
           setMessage({
             kind: "ok",
-            text: `Redeemed. Next live window selected: ${next.asset} ${next.timeframe}. Place the roll on Markets.`,
+            text: `Claimed. Picked your next window: ${next.asset} ${next.timeframe} — place it on Markets.`,
           });
           setBusy(false);
           return;
@@ -176,7 +198,7 @@ export default function App() {
       }
 
       setJournal(loadJournal());
-      setMessage({ kind: "ok", text: `Redeemed${result.hash ? ` - ${shorten(result.hash)}` : ""}.` });
+      setMessage({ kind: "ok", text: `Claimed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -203,23 +225,23 @@ export default function App() {
         <div className="brand">
           <h1>Keel</h1>
           <p>
-            Event Contracts with a fixed line. Stake in plain language. Redeem what settled.
-            Roll the next window. Shannon testnet by default.
+            Bet on whether Bitcoin or Ethereum goes up or down in the next few minutes. Come back
+            after it settles to collect what you won.
           </p>
         </div>
         <div className="session">
           <label>Network</label>
           <div className="row">
             <select value={network} onChange={(e) => setNetwork(e.target.value as NetworkName)} disabled={connected}>
-              <option value="shannon">Shannon testnet (50312)</option>
-              <option value="mainnet">Somnia mainnet (5031)</option>
+              <option value="shannon">Test network (practice money)</option>
+              <option value="mainnet">Somnia mainnet (real money)</option>
             </select>
           </div>
-          <label>Session private key (optional, local only)</label>
+          <label>Wallet key (only needed to bet — browsing is free)</label>
           <div className="row">
             <input
               type="password"
-              placeholder="0x... trading key - never a funded withdrawal wallet"
+              placeholder="0x... a spending key, never your main wallet"
               value={privateKey}
               onChange={(e) => setPrivateKey(e.target.value)}
               disabled={connected}
@@ -230,7 +252,7 @@ export default function App() {
             {connected ? (
               <>
                 <button className="ghost" onClick={() => void refresh()} disabled={busy}>
-                  Refresh markets
+                  Refresh
                 </button>
                 <button className="ghost" onClick={onDisconnect}>
                   Disconnect
@@ -238,14 +260,14 @@ export default function App() {
               </>
             ) : (
               <button onClick={() => void onConnect()} disabled={busy}>
-                {busy ? "Connecting..." : "Connect and load windows"}
+                {busy ? "Connecting..." : "Connect"}
               </button>
             )}
           </div>
           <div className="muted">
             {connected
-              ? `Connected${privateKey ? ` - ${maskKey(privateKey)}` : " - read-only"}`
-              : "Read-only works without a key. Trading and redeem need a key."}
+              ? `Connected${privateKey ? ` · ${maskKey(privateKey)}` : " · just browsing"}`
+              : "You can look around for free. Betting needs a wallet key."}
           </div>
         </div>
       </header>
@@ -257,50 +279,60 @@ export default function App() {
           Markets
         </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
-          Desk - {open.length} open - {claimable.length} claimable
+          My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
         </button>
       </div>
 
       {tab === "markets" && (
         <div className="grid">
           <section className="card">
-            <h2>Live windows</h2>
-            {!connected && <p className="muted">Connect to load Event Contract markets from the Somnia indexer.</p>}
+            <h2>Will it go up or down?</h2>
+            {!connected && <p className="muted">Connect to see live BTC and ETH windows.</p>}
             {connected && markets.length === 0 && (
-              <p className="muted">No binary windows returned. Confirm the indexer is reachable and SDK 0.28.1+.</p>
+              <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
             )}
-            {markets.map((m) => (
-              <article
-                key={m.marketId}
-                className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                onClick={() => setSelectedId(m.marketId)}
-              >
-                <div className="market-top">
-                  <strong>
-                    {m.asset} - {m.timeframe}
-                  </strong>
-                  <span className={`badge ${m.status}`}>{STATUS_LABEL[m.status]}</span>
-                </div>
-                <div className="market-top" style={{ marginTop: 6 }}>
-                  <span>Up {formatProb(m.impliedUp)}</span>
-                  <span>{formatCountdown(m.secondsLeft)}</span>
-                </div>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  {shorten(m.marketId, 5)} - ask {m.bestAsk ?? "-"} - bid {m.bestBid ?? "-"}
-                </div>
-              </article>
-            ))}
+            {markets.map((m) => {
+              const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
+              const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
+              return (
+                <article
+                  key={m.marketId}
+                  className={`market ${selected?.marketId === m.marketId ? "selected" : ""}`}
+                  onClick={() => setSelectedId(m.marketId)}
+                >
+                  <div className="market-top">
+                    <strong className="market-name">
+                      <span className="asset-icon">{ASSET_ICON[m.asset]}</span>
+                      {m.asset} <span className="muted">· {m.timeframe}</span>
+                    </strong>
+                    <span className={`badge ${m.status}`}>{STATUS_LABEL[m.status]}</span>
+                  </div>
+                  <div className="odds-bar">
+                    <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
+                    <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
+                  </div>
+                  <div className="odds-labels">
+                    <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
+                    <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
+                  </div>
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    {formatCloseLabel(m.expirySec, secondsLeft)}
+                  </div>
+                </article>
+              );
+            })}
           </section>
 
           <section className="card">
-            <h2>Ticket</h2>
-            {!selected && <p className="muted">Select a window.</p>}
+            <h2>Place your bet</h2>
+            {!selected && <p className="muted">Pick a window on the left.</p>}
             {selected && quote && (
               <>
                 <p className="plain">{plainLanguage(selected, stake, "up")}</p>
-                <div className="ticket-math">
-                  <div>
-                    <span>Stake</span>
+                <label className="stake-label">
+                  How much do you want to bet?
+                  <div className="stake-input">
+                    <span>$</span>
                     <input
                       type="number"
                       min={0.5}
@@ -309,25 +341,19 @@ export default function App() {
                       onChange={(e) => setStake(Number(e.target.value))}
                     />
                   </div>
+                </label>
+                <div className="ticket-math">
                   <div>
-                    <span>Up implied</span>
-                    {formatProb(selected.impliedUp)}
+                    <span>You win if Up</span>
+                    {formatUsd(quoteTicket("up", stake, selected.impliedUp).redeemIfWin)}
                   </div>
                   <div>
-                    <span>If you stake Up</span>
-                    redeem ~{formatUsd(quoteTicket("up", stake, selected.impliedUp).redeemIfWin)}
+                    <span>You win if Down</span>
+                    {formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
                   </div>
                   <div>
-                    <span>If you stake Down</span>
-                    redeem ~{formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
-                  </div>
-                  <div>
-                    <span>Maximum loss</span>
+                    <span>Most you can lose</span>
                     {formatUsd(stake)}
-                  </div>
-                  <div>
-                    <span>Reference</span>
-                    {selected.openingPriceLabel}
                   </div>
                 </div>
                 <div className="actions">
@@ -336,19 +362,22 @@ export default function App() {
                     disabled={busy || !privateKey || selected.status !== "trading"}
                     onClick={() => void onTrade("up")}
                   >
-                    Stake Up
+                    Bet Up
                   </button>
                   <button
                     className="down"
                     disabled={busy || !privateKey || selected.status !== "trading"}
                     onClick={() => void onTrade("down")}
                   >
-                    Stake Down
+                    Bet Down
                   </button>
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
-                  Orders are IOC limits through @somnia-chain/markets-sdk. Writes are refused unless on-chain status is
-                  Trading (1). Use a session key that cannot withdraw.
+                  {selected.status !== "trading"
+                    ? "This window isn't open for new bets right now."
+                    : !privateKey
+                      ? "Add a session key above to place a bet."
+                      : "You can only lose what you bet — never more."}
                 </p>
               </>
             )}
@@ -359,10 +388,10 @@ export default function App() {
       {tab === "desk" && (
         <div className="grid">
           <section className="card">
-            <h2>Open and claimable</h2>
+            <h2>Your bets</h2>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
               <input type="checkbox" checked={rollAfterRedeem} onChange={(e) => setRollAfterRedeem(e.target.checked)} />
-              After redeem, select the next live window for a roll
+              After I claim, line up the next window automatically
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button
@@ -375,47 +404,50 @@ export default function App() {
                   })();
                 }}
               >
-                Redeem all claimable
+                Claim all winnings
               </button>
             </div>
-            <h3 className="muted">Open</h3>
-            {open.length === 0 && <p className="muted">No open trades in the local journal.</p>}
+            <h3 className="muted">Still running</h3>
+            {open.length === 0 && <p className="muted">No bets in progress yet.</p>}
             {open.map((p) => (
               <div key={p.marketId + p.side} className="market">
                 <div className="market-top">
-                  <strong>
-                    {p.side.toUpperCase()} - {shorten(p.symbol, 8)}
+                  <strong className="market-name">
+                    <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
+                    {p.asset} <span className="muted">· {p.timeframe}</span>
                   </strong>
                   <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
                 </div>
                 <div className="muted">
-                  stake {formatUsd(p.stake)} - {formatUsd(p.contracts, 3)} contracts @ {formatProb(p.entryProb)}
+                  You bet {formatUsd(p.stake)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong> at {formatProb(p.entryProb)} odds
                 </div>
               </div>
             ))}
-            <h3 className="muted">Claimable</h3>
+            <h3 className="muted">Ready to claim</h3>
             {claimable.length === 0 && (
-              <p className="muted">Nothing to redeem yet. Settled journal trades will appear here.</p>
+              <p className="muted">Nothing to claim yet. Settled bets show up here.</p>
             )}
             {claimable.map((c) => (
               <div key={c.marketId} className="market">
                 <div className="market-top">
-                  <strong>{shorten(c.symbol, 8)}</strong>
+                  <strong className="market-name">
+                    <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
+                    {c.asset} <span className="muted">· {c.timeframe} · {c.side === "up" ? "Up" : "Down"}</span>
+                  </strong>
                   <button disabled={busy || !privateKey} onClick={() => void onRedeem(c.marketId, c.symbol, c.side)}>
-                    Redeem
+                    Claim {formatUsd(c.estimatedPayout)}
                   </button>
                 </div>
-                <div className="muted">est. payout {formatUsd(c.estimatedPayout)}</div>
               </div>
             ))}
           </section>
           <section className="card">
-            <h2>Journal</h2>
+            <h2>Activity</h2>
             <table>
               <thead>
                 <tr>
                   <th>When</th>
-                  <th>Kind</th>
+                  <th>What</th>
                   <th>Market</th>
                   <th>Detail</th>
                 </tr>
@@ -424,18 +456,21 @@ export default function App() {
                 {journal.length === 0 && (
                   <tr>
                     <td colSpan={4} className="muted">
-                      Empty. Trades, redeems, and rolls are stored in this browser only.
+                      Nothing yet. Your bets, claims, and rolls show up here, saved only on this device.
                     </td>
                   </tr>
                 )}
                 {journal.map((row) => (
                   <tr key={row.id}>
                     <td>{new Date(row.at).toLocaleString()}</td>
-                    <td>{row.kind}</td>
-                    <td>{shorten(row.symbol || row.marketId, 6)}</td>
+                    <td>{KIND_LABEL[row.kind]}</td>
                     <td>
-                      {row.side ? row.side.toUpperCase() + " - " : ""}
-                      {row.stake !== undefined ? `stake ${formatUsd(row.stake)} - ` : ""}
+                      <span className="asset-icon">{ASSET_ICON[detectAsset(row.symbol || row.marketId)]}</span>
+                      {detectAsset(row.symbol || row.marketId)}
+                    </td>
+                    <td>
+                      {row.side ? (row.side === "up" ? "Up" : "Down") + " · " : ""}
+                      {row.stake !== undefined ? `$${formatUsd(row.stake)} · ` : ""}
                       {row.hash ? shorten(row.hash) : row.note || row.result || ""}
                     </td>
                   </tr>
