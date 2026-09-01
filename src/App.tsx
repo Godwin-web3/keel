@@ -1037,7 +1037,7 @@ export default function App() {
       )}
 
       {tab === "leaderboard" && (
-        <div className="grid">
+        <div className="grid single">
           <section className="card">
             <h2>Recent winning stakes</h2>
             <p className="muted" style={{ marginBottom: 14 }}>

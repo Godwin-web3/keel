@@ -93,6 +93,7 @@ body,
 
 body {
   background: var(--bg);
+  overflow-x: hidden;
 }
 
 h1,
@@ -207,6 +208,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 10px;
   padding: 4px 0 20px;
 }
 
@@ -239,6 +242,8 @@ button:disabled {
 .nav-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -479,6 +484,11 @@ button:disabled {
   grid-template-columns: 1.15fr 0.85fr;
   gap: 16px;
   align-items: start;
+}
+
+.grid.single {
+  grid-template-columns: 1fr;
+  max-width: 640px;
 }
 
 .card {
