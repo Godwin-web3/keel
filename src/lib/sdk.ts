@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
-import type { Claimable, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
-import { detectAsset, detectTimeframe, statusFromCode } from "./format";
+import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
+import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
 
 export type SessionConfig = {
   network: NetworkName;
@@ -31,11 +31,7 @@ type Exchange = {
       noId?: bigint | number | string;
       [k: string]: unknown;
     }>;
-    getOutcomeBalance?: (
-      outcomeToken: `0x${string}`,
-      account: `0x${string}`,
-      tokenId: bigint | number | string,
-    ) => Promise<bigint>;
+    getOutcomeBalance?: (p: { outcomeToken: `0x${string}`; account: `0x${string}`; id: bigint }) => Promise<bigint>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
   };
   trader?: {
@@ -154,12 +150,11 @@ function extractExpiry(market: any): number {
   return n;
 }
 
-// Real Event Contract symbols look like "BTC-0-12AUG26-1600/USDso#YES": asset,
+// A ccxt-style order symbol looks like "BTC-0-12AUG26-1600/USDso#YES": asset,
 // series index, expiry date (DDMMMYY), expiry time (HHMM, UTC), then
-// collateral/outcome. The indexer's exact field name for this string isn't
-// documented, so we scan for it rather than trust one guessed key, and parse
-// the expiry straight out of it rather than a separate (also-unconfirmed)
-// timestamp field.
+// collateral/outcome. That's the trading-layer symbol used for order books
+// and order placement, not what the indexer's Market rows return, so it's
+// only a fallback here when the confirmed indexer fields (below) are absent.
 const SYMBOL_RE = /^(BTC|ETH)-\d+-(\d{2})([A-Za-z]{3})(\d{2})-(\d{4})\//;
 const MONTHS: Record<string, number> = {
   JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
@@ -191,17 +186,42 @@ function findSymbolLike(obj: unknown, depth = 0): string {
   return "";
 }
 
-function resolveSymbolMeta(
+function intervalToTimeframe(intervalSec: number): string {
+  if (!Number.isFinite(intervalSec) || intervalSec <= 0) return "";
+  if (intervalSec % 3600 === 0) return `${intervalSec / 3600}h`;
+  if (intervalSec % 60 === 0) return `${intervalSec / 60}m`;
+  return `${Math.round(intervalSec)}s`;
+}
+
+// Confirmed directly against the @somnia-chain/markets-sdk source (BinaryMarket
+// in src/markets.ts) and the live indexer schema (dev.smk.somnia.host): a
+// market row carries "asset" as a plain "BTC"/"ETH" string, "expiry" and
+// "tradingStart" in unix seconds — no ccxt-style symbol string at all (that
+// format is synthesized by the SDK's own unified layer for order placement,
+// from asset+strike+expiry, not something the indexer or listLiveBinaryMarkets
+// returns). These direct fields are the primary source; the symbol scan above
+// is only a fallback for a market row shape that doesn't carry them.
+function resolveMarketMeta(
   market: any,
   declaredSymbol: string,
-): { symbol: string; asset: WindowMarket["asset"]; expirySec: number } {
+): { symbol: string; asset: WindowMarket["asset"]; expirySec: number; timeframe: string } {
+  const rawAsset = String(market?.asset ?? market?.info?.asset ?? "").toUpperCase();
+  const directAsset: WindowMarket["asset"] | null = rawAsset === "BTC" || rawAsset === "ETH" ? (rawAsset as "BTC" | "ETH") : null;
+  const directExpiry = extractExpiry(market);
+  const tradingStart = Number(market?.tradingStart ?? market?.info?.tradingStart ?? 0);
+  const rawInterval =
+    directExpiry && tradingStart ? directExpiry - tradingStart : Number(market?.intervalSec ?? market?.info?.intervalSec ?? 0);
+  const directTimeframe = intervalToTimeframe(rawInterval);
+
   const symbol = SYMBOL_RE.test(declaredSymbol) ? declaredSymbol : findSymbolLike(market) || declaredSymbol;
   const meta = parseSymbolMeta(symbol);
-  return {
-    symbol: symbol || declaredSymbol,
-    asset: meta?.asset ?? detectAsset(symbol || declaredSymbol),
-    expirySec: meta?.expirySec ?? extractExpiry(market) ?? 0,
-  };
+
+  const asset = directAsset ?? meta?.asset ?? detectAsset(symbol || declaredSymbol);
+  const expirySec = directExpiry || meta?.expirySec || 0;
+  const now = Date.now() / 1000;
+  const timeframe = directTimeframe || detectTimeframe(expirySec ? expirySec - now : 0, symbol);
+
+  return { symbol: symbol || declaredSymbol, asset, expirySec, timeframe };
 }
 
 export async function listWindows(): Promise<WindowMarket[]> {
@@ -215,21 +235,26 @@ export async function listWindows(): Promise<WindowMarket[]> {
     for (const m of live) {
       const marketId = String(m.marketId || m.id || "");
       if (!marketId.startsWith("0x")) continue;
-      let statusCode = Number(m.status ?? 1);
+      // m.status here is the indexer's BinaryMarketStatus STRING ("Trading",
+      // "Finalized", ...), not a numeric code — used only if the on-chain
+      // read below fails.
+      let status: MarketStatus = statusFromString(m.status);
+      let statusCode = 1;
       let isResolved: boolean | undefined;
       let isVoided: boolean | undefined;
       let winningOutcome: number | null | undefined;
       try {
         const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
         statusCode = Number(onchain.status);
+        status = statusFromCode(statusCode);
         isResolved = onchain.isResolved;
         isVoided = onchain.isVoided;
         winningOutcome = onchain.winningOutcome ?? null;
       } catch {
-        /* indexer row still useful */
+        /* on-chain read failed; fall back to the indexer's own status string */
       }
       const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
-      const { symbol, asset, expirySec } = resolveSymbolMeta(m, declaredSymbol);
+      const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
       const secondsLeft = expirySec ? expirySec - now : 0;
       const book = await safeBook(symbol || marketId);
       out.push({
@@ -237,10 +262,10 @@ export async function listWindows(): Promise<WindowMarket[]> {
         symbol: symbol || marketId,
         upSymbol: symbol || marketId,
         asset,
-        timeframe: detectTimeframe(secondsLeft, symbol),
+        timeframe,
         expirySec,
         secondsLeft,
-        status: statusFromCode(statusCode),
+        status,
         statusCode,
         isResolved,
         isVoided,
@@ -270,6 +295,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
     if (!marketId || !upSymbol) continue;
 
     let statusCode = 1;
+    let status: MarketStatus = statusFromString(m.status ?? m.info?.status);
     let isResolved: boolean | undefined;
     let isVoided: boolean | undefined;
     let winningOutcome: number | null | undefined;
@@ -277,15 +303,17 @@ export async function listWindows(): Promise<WindowMarket[]> {
       if (marketId.startsWith("0x")) {
         const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
         statusCode = Number(onchain.status);
+        status = statusFromCode(statusCode);
         isResolved = onchain.isResolved;
         isVoided = onchain.isVoided;
         winningOutcome = onchain.winningOutcome ?? null;
       }
     } catch {
       statusCode = m.active ? 1 : 4;
+      if (status === "unknown") status = statusFromCode(statusCode);
     }
 
-    const { symbol, asset, expirySec } = resolveSymbolMeta(m, upSymbol);
+    const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, upSymbol);
     const secondsLeft = expirySec ? expirySec - now : 0;
     const book = await safeBook(symbol);
 
@@ -294,10 +322,10 @@ export async function listWindows(): Promise<WindowMarket[]> {
       symbol,
       upSymbol: symbol,
       asset,
-      timeframe: detectTimeframe(secondsLeft, symbol),
+      timeframe,
       expirySec,
       secondsLeft,
-      status: statusFromCode(statusCode),
+      status,
       statusCode,
       isResolved,
       isVoided,
@@ -396,8 +424,8 @@ export async function redeemMarket(
     }
 
     const outcomeIdx = side === "up" ? 0 : 1;
-    const tokenId = outcomeIdx === 0 ? yesId : noId;
-    const amount = await exchange.client.getOutcomeBalance(outcomeToken, accountAddress, tokenId);
+    const tokenId = BigInt(outcomeIdx === 0 ? yesId : noId);
+    const amount = await exchange.client.getOutcomeBalance({ outcomeToken, account: accountAddress, id: tokenId });
     if (amount === 0n) {
       throw new Error("No redeemable balance held for this side on this market.");
     }
@@ -457,7 +485,7 @@ export function derivePositions(
     const entryProb = row.entryProb ?? 0.5;
     const contracts = entryProb > 0 ? stake / entryProb : 0;
 
-    if (status === "trading" || status === "locked" || status === "listed") {
+    if (status === "trading" || status === "locked" || status === "listed" || status === "settling") {
       open.push({
         marketId: row.marketId,
         symbol: market?.symbol ?? row.marketId,
@@ -471,7 +499,7 @@ export function derivePositions(
       });
     }
 
-    if (status === "resolved" || status === "voided") {
+    if (status === "resolved" || status === "voided" || status === "finalized") {
       const winningSide = sideFromWinningOutcome(market?.winningOutcome);
       const estimatedPayout =
         status === "voided"
@@ -489,7 +517,7 @@ export function derivePositions(
         side,
         contracts,
         estimatedPayout,
-        resolved: status === "resolved",
+        resolved: status === "resolved" || status === "finalized",
       });
     }
   }

@@ -4,8 +4,10 @@ export const STATUS_LABEL: Record<MarketStatus, string> = {
   listed: "Coming up",
   trading: "Open",
   locked: "Closing",
+  settling: "Settling",
   resolved: "Settled",
   voided: "Voided",
+  finalized: "Settled",
   unknown: "Unknown",
 };
 
@@ -15,13 +17,41 @@ export const ASSET_ICON: Record<WindowMarket["asset"], string> = {
   OTHER: "◆",
 };
 
+// Index -> status for the on-chain MarketStatus enum (confirmed against
+// @somnia-chain/markets-sdk's BINARY_MARKET_STATUS: Listed, Trading, Locked,
+// Settling, Resolved, Voided — "Finalized" is indexer-derived, no numeric code).
 export function statusFromCode(code: number): MarketStatus {
   if (code === 0) return "listed";
   if (code === 1) return "trading";
   if (code === 2) return "locked";
+  if (code === 3) return "settling";
   if (code === 4) return "resolved";
   if (code === 5) return "voided";
   return "unknown";
+}
+
+// Fallback for when the on-chain status read fails: map the indexer's own
+// BinaryMarketStatus string (what listLiveBinaryMarkets returns as `status`)
+// instead of leaving the market as "unknown".
+export function statusFromString(status: unknown): MarketStatus {
+  switch (String(status ?? "")) {
+    case "Listed":
+      return "listed";
+    case "Trading":
+      return "trading";
+    case "Locked":
+      return "locked";
+    case "Settling":
+      return "settling";
+    case "Resolved":
+      return "resolved";
+    case "Voided":
+      return "voided";
+    case "Finalized":
+      return "finalized";
+    default:
+      return "unknown";
+  }
 }
 
 export function detectAsset(symbol: string): WindowMarket["asset"] {

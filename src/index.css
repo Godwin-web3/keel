@@ -413,13 +413,15 @@ button:disabled {
   border-color: transparent;
 }
 
-.badge.locked {
+.badge.locked,
+.badge.settling {
   color: var(--warn);
   background: var(--warn-dim);
   border-color: transparent;
 }
 
-.badge.resolved {
+.badge.resolved,
+.badge.finalized {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: transparent;

@@ -1,6 +1,6 @@
 export type NetworkName = "shannon" | "mainnet";
 
-export type MarketStatus = "listed" | "trading" | "locked" | "resolved" | "voided" | "unknown";
+export type MarketStatus = "listed" | "trading" | "locked" | "settling" | "resolved" | "voided" | "finalized" | "unknown";
 
 export type Side = "up" | "down";
 
@@ -9,7 +9,7 @@ export type WindowMarket = {
   symbol: string;
   upSymbol: string;
   asset: "BTC" | "ETH" | "OTHER";
-  timeframe: "15m" | "1h" | "other";
+  timeframe: string;
   expirySec: number;
   secondsLeft: number;
   status: MarketStatus;
