@@ -98,7 +98,7 @@ export default function App() {
     open: [],
     claimable: [],
   });
-  const ticketRef = useRef<HTMLElement | null>(null);
+  const [betOpen, setBetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [markets, setMarkets] = useState<WindowMarket[]>([]);
@@ -171,15 +171,15 @@ export default function App() {
 
   function selectMarket(id: string) {
     setSelectedId(id);
-    if (window.matchMedia("(max-width: 900px)").matches) {
-      requestAnimationFrame(() => {
-        ticketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    }
+    setBetOpen(true);
   }
 
-  const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
-  const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
+  function closeBetSheet() {
+    setBetOpen(false);
+    setPendingBet(null);
+  }
+
+  const selected = markets.find((m) => m.marketId === selectedId) ?? null;
 
   // Group windows by asset+cadence and order soonest-first, so each group can
   // render as a Live/Next/Later round carousel instead of one flat list.
@@ -288,7 +288,6 @@ export default function App() {
     try {
       const rows = await listWindows();
       setMarkets(rows);
-      if (!selectedId && rows[0]) setSelectedId(rows[0].marketId);
       if (walletAddress) void discoverPositions(walletAddress);
       if (!silent) setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
     } catch (err) {
@@ -320,7 +319,6 @@ export default function App() {
       setWalletAddress(address);
       const rows = await listWindows();
       setMarkets(rows);
-      setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
       if (address) void discoverPositions(address);
       setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
       return true;
@@ -347,7 +345,6 @@ export default function App() {
       setShowKeyFallback(false);
       const rows = await listWindows();
       setMarkets(rows);
-      setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
       void discoverPositions(address);
       setMessage({
         kind: "ok",
@@ -563,6 +560,9 @@ export default function App() {
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
           </button>
+          <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>
+            {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "☀" : "🌙"}
+          </button>
           <button className="more-trigger" aria-label="More" onClick={() => setMoreOpen(true)}>
             ☰
           </button>
@@ -587,17 +587,6 @@ export default function App() {
               }}
             >
               🏆 Leaderboard
-            </button>
-            <button
-              className="more-item"
-              onClick={() => {
-                toggleTheme();
-                setMoreOpen(false);
-              }}
-            >
-              {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
-                ? "☀ Switch to light"
-                : "🌙 Switch to dark"}
             </button>
             <a
               className="more-item"
@@ -716,117 +705,17 @@ export default function App() {
         </div>
       )}
 
-      {pendingBet && selected && (
-        <div className="confirm-backdrop" onClick={() => setPendingBet(null)}>
-          <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
-            <h2>Confirm your bet</h2>
-            <p className="muted" style={{ marginBottom: 14 }}>
-              {selected.asset} {selected.timeframe} ·{" "}
-              <span className={`confirm-side ${pendingBet}`}>{pendingBet === "up" ? "Up" : "Down"}</span>
-            </p>
-            <div className="ticket-math">
-              <div>
-                <span>You're staking</span>
-                {formatUsd(stake)}
-              </div>
-              <div>
-                <span>You get back if right</span>
-                {formatUsd(quoteTicket(pendingBet, stake, selected.impliedUp).redeemIfWin)}
-              </div>
-              <div>
-                <span>Most you can lose</span>
-                {formatUsd(stake)}
-              </div>
-            </div>
-            <div className="actions" style={{ marginTop: 16 }}>
-              <button
-                className={pendingBet}
-                disabled={busy}
-                onClick={() => {
-                  const side = pendingBet;
-                  setPendingBet(null);
-                  void onTrade(side);
-                }}
-              >
-                Confirm {pendingBet === "up" ? "Up" : "Down"}
-              </button>
-              <button className="ghost" onClick={() => setPendingBet(null)}>
-                Cancel
+      {betOpen && selected && (
+        <div className="confirm-backdrop" onClick={closeBetSheet}>
+          <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="wallet-sheet-head">
+              <h2>{pendingBet ? "Confirm your bet" : "Place your bet"}</h2>
+              <button className="ghost" onClick={closeBetSheet}>
+                Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
-
-      <div className="tabs">
-        <button className={tab === "markets" ? "active" : ""} onClick={() => setTab("markets")}>
-          Markets
-        </button>
-        <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
-          My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
-        </button>
-      </div>
-
-      {tab === "markets" && (
-        <div className="grid">
-          <section className="card">
-            <h2>Will it go up or down?</h2>
-            {!connected && !busy && <p className="muted">Couldn't load windows. Try refreshing.</p>}
-            {!connected && busy && <p className="muted">Loading live BTC and ETH windows...</p>}
-            {connected && markets.length === 0 && (
-              <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
-            )}
-            <div className="market-list">
-              {roundGroups.map((group) => (
-                <div key={group.key} className="round-group">
-                  <div className="round-group-head">
-                    <span className="asset-icon">{ASSET_ICON[group.asset]}</span>
-                    {group.asset} · {group.timeframe}
-                  </div>
-                  <div className="round-track">
-                    {group.rounds.slice(0, 4).map((m, idx) => {
-                      const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
-                      const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
-                      const slot = slotLabel(idx, m.status);
-                      const totalSeconds = timeframeSeconds(m.timeframe);
-                      return (
-                        <article
-                          key={m.marketId}
-                          className={`round-card ${slot === "Live" ? "live" : ""} ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                          onClick={() => selectMarket(m.marketId)}
-                        >
-                          <div className="market-top">
-                            <span className="round-slot">{slot}</span>
-                            {secondsLeft > 0 && secondsLeft <= totalSeconds && (
-                              <CountdownRing secondsLeft={secondsLeft} totalSeconds={totalSeconds} size={26} />
-                            )}
-                          </div>
-                          <div className="odds-bar">
-                            <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
-                            <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
-                          </div>
-                          <div className="odds-labels">
-                            <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
-                            <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
-                          </div>
-                          <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                            {formatCloseLabel(m.expirySec, secondsLeft)}
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="card ticket-panel" ref={ticketRef}>
-            <h2>Place your bet</h2>
-            {!selected && <p className="muted">Pick a window on the left.</p>}
-            {selected && quote && (
+            {!pendingBet && (
               <>
                 <p className="plain">
                   {selected.asset === "OTHER" ? "This market" : selected.asset} · Up or Down in {selected.timeframe}
@@ -884,8 +773,112 @@ export default function App() {
                 </p>
               </>
             )}
-          </section>
+
+            {pendingBet && (
+              <>
+                <p className="muted" style={{ marginBottom: 14 }}>
+                  {selected.asset} {selected.timeframe} ·{" "}
+                  <span className={`confirm-side ${pendingBet}`}>{pendingBet === "up" ? "Up" : "Down"}</span>
+                </p>
+                <div className="ticket-math">
+                  <div>
+                    <span>You're staking</span>
+                    {formatUsd(stake)}
+                  </div>
+                  <div>
+                    <span>You get back if right</span>
+                    {formatUsd(quoteTicket(pendingBet, stake, selected.impliedUp).redeemIfWin)}
+                  </div>
+                  <div>
+                    <span>Most you can lose</span>
+                    {formatUsd(stake)}
+                  </div>
+                </div>
+                <div className="actions" style={{ marginTop: 16 }}>
+                  <button
+                    className={pendingBet}
+                    disabled={busy}
+                    onClick={() => {
+                      const side = pendingBet;
+                      closeBetSheet();
+                      void onTrade(side);
+                    }}
+                  >
+                    Confirm {pendingBet === "up" ? "Up" : "Down"}
+                  </button>
+                  <button className="ghost" onClick={() => setPendingBet(null)}>
+                    Back
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
+      )}
+
+      {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
+
+      <div className="tabs">
+        <button className={tab === "markets" ? "active" : ""} onClick={() => setTab("markets")}>
+          Markets
+        </button>
+        <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
+          My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
+        </button>
+      </div>
+
+      {tab === "markets" && (
+        <section className="card markets-full">
+          <h2>Will it go up or down?</h2>
+          {!connected && !busy && <p className="muted">Couldn't load windows. Try refreshing.</p>}
+          {!connected && busy && <p className="muted">Loading live BTC and ETH windows...</p>}
+          {connected && markets.length === 0 && (
+            <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
+          )}
+          <div className="market-list">
+            {roundGroups.map((group) => (
+              <div key={group.key} className="round-group">
+                <div className="round-group-head">
+                  <span className="asset-icon">{ASSET_ICON[group.asset]}</span>
+                  {group.asset} · {group.timeframe}
+                </div>
+                <div className="round-track">
+                  {group.rounds.slice(0, 4).map((m, idx) => {
+                    const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
+                    const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
+                    const slot = slotLabel(idx, m.status);
+                    const totalSeconds = timeframeSeconds(m.timeframe);
+                    return (
+                      <article
+                        key={m.marketId}
+                        className={`round-card ${slot === "Live" ? "live" : ""} ${selected?.marketId === m.marketId ? "selected" : ""}`}
+                        onClick={() => selectMarket(m.marketId)}
+                      >
+                        <div className="market-top">
+                          <span className="round-slot">{slot}</span>
+                          {secondsLeft > 0 && secondsLeft <= totalSeconds && (
+                            <CountdownRing secondsLeft={secondsLeft} totalSeconds={totalSeconds} size={26} />
+                          )}
+                        </div>
+                        <div className="odds-bar">
+                          <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
+                          <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
+                        </div>
+                        <div className="odds-labels">
+                          <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
+                          <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
+                        </div>
+                        <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+                          {formatCloseLabel(m.expirySec, secondsLeft)}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {tab === "desk" && (
