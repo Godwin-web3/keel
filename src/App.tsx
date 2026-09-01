@@ -34,6 +34,7 @@ import {
 import Landing from "./Landing";
 import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
+import { CoinsIcon, ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
 
 type Tab = "markets" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
@@ -554,52 +555,59 @@ export default function App() {
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
             <button className="unclaimed-pill" onClick={() => setTab("desk")}>
-              💰 ${formatUsd(totalUnclaimed)} to claim
+              <CoinsIcon /> ${formatUsd(totalUnclaimed)} to claim
             </button>
           )}
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
           </button>
           <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>
-            {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "☀" : "🌙"}
+            {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? (
+              <SunIcon />
+            ) : (
+              <MoonIcon />
+            )}
           </button>
-          <button className="more-trigger" aria-label="More" onClick={() => setMoreOpen(true)}>
-            ☰
-          </button>
-        </div>
-      </nav>
-
-      {moreOpen && (
-        <div className="wallet-backdrop" onClick={() => setMoreOpen(false)}>
-          <div className="wallet-sheet more-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="wallet-sheet-head">
-              <h2>More</h2>
-              <button className="ghost" onClick={() => setMoreOpen(false)}>
-                Close
-              </button>
-            </div>
+          <div className="more-menu-wrap">
             <button
-              className="more-item"
-              onClick={() => {
-                setTab("leaderboard");
-                setMoreOpen(false);
-                if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
-              }}
+              className={`more-trigger ${moreOpen ? "active" : ""}`}
+              aria-label="More"
+              onClick={() => setMoreOpen((v) => !v)}
             >
-              🏆 Leaderboard
+              <MenuIcon />
             </button>
-            <a
-              className="more-item"
-              href="https://github.com/Godwin-web3/keel"
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setMoreOpen(false)}
-            >
-              View source
-            </a>
+            {moreOpen && (
+              <>
+                <div className="menu-catcher" onClick={() => setMoreOpen(false)} />
+                <div className="dropdown-menu">
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      setTab("leaderboard");
+                      setMoreOpen(false);
+                      if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
+                    }}
+                  >
+                    <TrophyIcon />
+                    Leaderboard
+                  </button>
+                  <div className="dropdown-divider" />
+                  <a
+                    className="dropdown-item"
+                    href="https://github.com/Godwin-web3/keel"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setMoreOpen(false)}
+                  >
+                    <ExternalLinkIcon />
+                    View source
+                  </a>
+                </div>
+              </>
+            )}
           </div>
         </div>
-      )}
+      </nav>
 
       {walletOpen && (
         <div className="wallet-backdrop" onClick={() => setWalletOpen(false)}>
@@ -640,7 +648,13 @@ export default function App() {
               <>
                 <div className="row">
                   <button onClick={() => void connectInjected()} disabled={busy || !injectedAvailable}>
-                    {busy ? "Connecting..." : "Connect Wallet"}
+                    {busy ? (
+                      <>
+                        <SpinnerIcon /> Connecting...
+                      </>
+                    ) : (
+                      "Connect Wallet"
+                    )}
                   </button>
                   <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
                     Refresh
@@ -685,7 +699,13 @@ export default function App() {
                         }}
                         disabled={busy || !privateKey.trim()}
                       >
-                        {busy ? "Connecting..." : "Connect with key"}
+                        {busy ? (
+                          <>
+                            <SpinnerIcon /> Connecting...
+                          </>
+                        ) : (
+                          "Connect with key"
+                        )}
                       </button>
                     </div>
                   </div>
@@ -830,12 +850,29 @@ export default function App() {
       {tab === "markets" && (
         <section className="card markets-full">
           <h2>Will it go up or down?</h2>
-          {!connected && !busy && <p className="muted">Couldn't load windows. Try refreshing.</p>}
-          {!connected && busy && <p className="muted">Loading live BTC and ETH windows...</p>}
-          {connected && markets.length === 0 && (
+          {!busy && !connected && <p className="muted">Couldn't load windows. Try refreshing.</p>}
+          {busy && markets.length === 0 && (
+            <div className="market-list">
+              {[0, 1].map((i) => (
+                <div key={i} className="round-group">
+                  <div className="skeleton skeleton-line" style={{ width: 120, height: 15, marginBottom: 10 }} />
+                  <div className="round-card skeleton-card">
+                    <div className="market-top">
+                      <div className="skeleton skeleton-line" style={{ width: 44, height: 11 }} />
+                      <div className="skeleton skeleton-circle" style={{ width: 26, height: 26 }} />
+                    </div>
+                    <div className="skeleton skeleton-line" style={{ height: 8, borderRadius: 999, margin: "12px 0 8px" }} />
+                    <div className="skeleton skeleton-line" style={{ width: "70%", height: 13 }} />
+                    <div className="skeleton skeleton-line" style={{ width: "45%", height: 11, marginTop: 10 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!busy && connected && markets.length === 0 && (
             <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
           )}
-          <div className="market-list">
+          <div className="market-list tab-enter">
             {roundGroups.map((group) => (
               <div key={group.key} className="round-group">
                 <div className="round-group-head">
@@ -882,7 +919,7 @@ export default function App() {
       )}
 
       {tab === "desk" && (
-        <div className="grid">
+        <div className="grid tab-enter">
           <section className="card">
             <h2>Your bets</h2>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
@@ -1030,14 +1067,18 @@ export default function App() {
       )}
 
       {tab === "leaderboard" && (
-        <div className="grid single">
+        <div className="grid single tab-enter">
           <section className="card">
             <h2>Recent winning stakes</h2>
             <p className="muted" style={{ marginBottom: 14 }}>
               Built from real fills on the last few settled windows — the wallets who bought onto the side that ended
               up winning. Not a full profit ranking (losing windows aren't netted out), just recent activity.
             </p>
-            {leaderboardBusy && <p className="muted">Reading recent settled windows...</p>}
+            {leaderboardBusy && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)", fontSize: 13 }}>
+                <SpinnerIcon /> Reading recent settled windows...
+              </div>
+            )}
             {!leaderboardBusy && leaderboard !== null && leaderboard.length === 0 && (
               <p className="muted">No winning fills found in the recent settled windows.</p>
             )}
