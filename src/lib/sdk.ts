@@ -1,3 +1,4 @@
+import { createWalletClient, custom } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
@@ -5,6 +6,26 @@ import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "
 export type SessionConfig = {
   network: NetworkName;
   privateKey?: string;
+};
+
+type PortfolioMarketShape = {
+  id: string;
+  marketAddress: string;
+  asset: string;
+  status: string;
+  strike: string;
+  expiry: string | null;
+  winningOutcome?: number | null;
+  voided: boolean;
+  quoteDecimals: number;
+  interval: string | null;
+};
+
+type PortfolioPositionShape = {
+  market: PortfolioMarketShape;
+  outcomeIndex: number;
+  tokenId: string;
+  balance: string;
 };
 
 type Exchange = {
@@ -32,6 +53,7 @@ type Exchange = {
       [k: string]: unknown;
     }>;
     getOutcomeBalance?: (p: { outcomeToken: `0x${string}`; account: `0x${string}`; id: bigint }) => Promise<bigint>;
+    getPortfolio?: (account: string, opts?: { tradesLimit?: number }) => Promise<{ positions: PortfolioPositionShape[] }>;
     redeemOutcome?: (...args: any[]) => Promise<any>;
   };
   trader?: {
@@ -57,28 +79,26 @@ export function maskKey(key: string): string {
   return `${key.slice(0, 6)}...${key.slice(-4)}`;
 }
 
+async function resolveNetworkConfig(network: NetworkName) {
+  const sdk = await import("@somnia-chain/markets-sdk");
+  const chainMod = await import("@somnia-chain/markets-sdk/chains").catch(() => null);
+
+  const isTest = network === "shannon";
+  const chain = (isTest ? chainMod?.somniaShannon ?? sdk.somniaShannon : chainMod?.somniaMainnet ?? sdk.somniaMainnet) ?? undefined;
+  const addresses = isTest ? sdk.SOMNIA_TESTNET_ADDRESSES : sdk.SOMNIA_MAINNET_ADDRESSES;
+  const indexerUrl = isTest ? "https://dev.smk.somnia.host/v1/graphql" : "https://prd.smk.somnia.host/v1/graphql";
+  const wsRpcUrl = isTest
+    ? "wss://api.infra.testnet.somnia.network/ws"
+    : "wss://api.infra.mainnet.somnia.network/ws";
+
+  return { sdk, chain, addresses, indexerUrl, wsRpcUrl };
+}
+
 export async function connectExchange(config: SessionConfig): Promise<void> {
   const fingerprint = `${config.network}:${config.privateKey ? "signed" : "read"}`;
   if (exchange && lastConfig === fingerprint) return;
 
-  const sdk = await import("@somnia-chain/markets-sdk");
-  const chainMod = await import("@somnia-chain/markets-sdk/chains").catch(() => null);
-
-  const isTest = config.network === "shannon";
-  const chain =
-    (isTest
-      ? chainMod?.somniaShannon ?? sdk.somniaShannon
-      : chainMod?.somniaMainnet ?? sdk.somniaMainnet) ?? undefined;
-
-  const addresses = isTest ? sdk.SOMNIA_TESTNET_ADDRESSES : sdk.SOMNIA_MAINNET_ADDRESSES;
-
-  const indexerUrl = isTest
-    ? "https://dev.smk.somnia.host/v1/graphql"
-    : "https://prd.smk.somnia.host/v1/graphql";
-
-  const wsRpcUrl = isTest
-    ? "wss://api.infra.testnet.somnia.network/ws"
-    : "wss://api.infra.mainnet.somnia.network/ws";
+  const { sdk, chain, addresses, indexerUrl, wsRpcUrl } = await resolveNetworkConfig(config.network);
 
   const opts: Record<string, unknown> = {
     indexerUrl,
@@ -99,8 +119,102 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
   await exchange.loadMarkets(true);
 }
 
+// ---------------- injected browser wallet (MetaMask/Rabby/etc.) ----------------
+
+type InjectedProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<any>;
+  on?: (event: string, handler: (...args: any[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: any[]) => void) => void;
+  providers?: InjectedProvider[];
+  isMetaMask?: boolean;
+};
+
+function getInjectedProvider(): InjectedProvider | null {
+  if (typeof window === "undefined") return null;
+  const eth = (window as any).ethereum as InjectedProvider | undefined;
+  if (!eth) return null;
+  // Multiple extensions (MetaMask + Rabby + Coinbase, say) stack under
+  // window.ethereum.providers rather than each claiming window.ethereum alone.
+  if (Array.isArray(eth.providers) && eth.providers.length > 0) {
+    return eth.providers.find((p) => p.isMetaMask) ?? eth.providers[0];
+  }
+  return eth;
+}
+
+export function hasInjectedWallet(): boolean {
+  return getInjectedProvider() !== null;
+}
+
+/** Checks for an already-authorized injected account without prompting. */
+export async function getAuthorizedInjectedAddress(): Promise<`0x${string}` | null> {
+  const provider = getInjectedProvider();
+  if (!provider) return null;
+  try {
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    return (accounts?.[0] as `0x${string}`) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureWalletOnChain(walletClient: ReturnType<typeof createWalletClient>, chain: { id: number }) {
+  const current = await walletClient.getChainId();
+  if (current === chain.id) return;
+  try {
+    await walletClient.switchChain({ id: chain.id });
+  } catch (err: any) {
+    const notAdded = err?.code === 4902 || /unrecognized|has not been added|does not exist/i.test(String(err?.message ?? ""));
+    if (!notAdded) throw err;
+    await walletClient.addChain({ chain: chain as any });
+    await walletClient.switchChain({ id: chain.id });
+  }
+}
+
+/**
+ * Connects via an injected browser wallet instead of a pasted private key.
+ * Prompts for account access (unless already authorized), then switches (or
+ * adds) the wallet to the target Somnia chain before wiring it into the SDK.
+ */
+export async function connectInjectedWallet(network: NetworkName): Promise<`0x${string}`> {
+  const provider = getInjectedProvider();
+  if (!provider) {
+    throw new Error("No wallet found. Install MetaMask, Rabby, or another browser wallet.");
+  }
+
+  const { sdk, chain, addresses, indexerUrl, wsRpcUrl } = await resolveNetworkConfig(network);
+  if (!chain) throw new Error("Somnia chain definition not found in the SDK.");
+
+  const requested = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const address = requested?.[0] as `0x${string}` | undefined;
+  if (!address) throw new Error("The wallet didn't return an account.");
+
+  const walletClient = createWalletClient({
+    account: address,
+    chain: chain as any,
+    transport: custom(provider),
+  });
+
+  await ensureWalletOnChain(walletClient, chain as any);
+
+  exchange = new sdk.SomniaMarkets({
+    indexerUrl,
+    chain,
+    wsRpcUrl,
+    addresses,
+    walletClient,
+  }) as unknown as Exchange;
+  lastConfig = `${network}:injected:${address.toLowerCase()}`;
+  accountAddress = address;
+  await exchange.loadMarkets(true);
+  return address;
+}
+
 export function isConnected(): boolean {
   return Boolean(exchange);
+}
+
+export function getAccountAddress(): `0x${string}` | null {
+  return accountAddress;
 }
 
 export function disconnectExchange(): void {
@@ -529,5 +643,105 @@ export function derivePositions(
     }
   }
 
+  return { open, claimable };
+}
+
+function normalizeAsset(raw: string): WindowMarket["asset"] {
+  const s = raw.toUpperCase();
+  if (s === "BTC" || s === "ETH") return s;
+  return "OTHER";
+}
+
+/**
+ * Scans the connected wallet's on-chain outcome-token balances via the
+ * indexer-backed portfolio query, so Desk can show positions the local
+ * journal never saw — a fresh browser, a cleared localStorage, or a bet
+ * placed from somewhere else entirely. Unlike journal-derived positions,
+ * these never know the original stake/entry price (only the balance and
+ * the market's own state are on-chain), so those fields come back null.
+ */
+export async function discoverOnchainPositions(account: `0x${string}`): Promise<{
+  open: OpenPosition[];
+  claimable: Claimable[];
+}> {
+  const open: OpenPosition[] = [];
+  const claimable: Claimable[] = [];
+  if (!exchange?.client.getPortfolio) return { open, claimable };
+
+  let positions: PortfolioPositionShape[] = [];
+  try {
+    const portfolio = await exchange.client.getPortfolio(account);
+    positions = portfolio.positions ?? [];
+  } catch {
+    return { open, claimable };
+  }
+
+  for (const p of positions) {
+    const balance = Number(p.balance);
+    if (!Number.isFinite(balance) || balance <= 0) continue;
+    const contracts = balance / 10 ** p.market.quoteDecimals;
+    const side: Side = p.outcomeIndex === 0 ? "up" : "down";
+    const asset = normalizeAsset(p.market.asset);
+    const timeframe = p.market.interval ?? "other";
+    const status = statusFromString(p.market.status);
+
+    if (status === "trading" || status === "locked" || status === "listed" || status === "settling") {
+      open.push({
+        marketId: p.market.id,
+        symbol: p.market.id,
+        asset,
+        timeframe,
+        side,
+        contracts,
+        entryProb: null,
+        stake: null,
+        status,
+        fromChain: true,
+      });
+    }
+
+    if (status === "resolved" || status === "voided" || status === "finalized") {
+      const winningSide = sideFromWinningOutcome(p.market.winningOutcome);
+      const estimatedPayout = p.market.voided
+        ? contracts * 0.5
+        : winningSide === null
+          ? contracts
+          : winningSide === side
+            ? contracts
+            : 0;
+      claimable.push({
+        marketId: p.market.id,
+        symbol: p.market.id,
+        asset,
+        timeframe,
+        side,
+        contracts,
+        estimatedPayout,
+        resolved: status === "resolved" || status === "finalized",
+        fromChain: true,
+      });
+    }
+  }
+
+  return { open, claimable };
+}
+
+/**
+ * Merges journal-derived positions with on-chain-discovered ones, keyed by
+ * market + side. The journal version wins on a collision (it knows the real
+ * stake/entry price the chain alone can't tell you); an on-chain-only find
+ * fills in whatever the journal missed.
+ */
+export function mergePositions(
+  base: { open: OpenPosition[]; claimable: Claimable[] },
+  extra: { open: OpenPosition[]; claimable: Claimable[] },
+): { open: OpenPosition[]; claimable: Claimable[] } {
+  const openKeys = new Set(base.open.map((p) => `${p.marketId}:${p.side}`));
+  const claimableKeys = new Set(base.claimable.map((p) => `${p.marketId}:${p.side}`));
+  const open = [...base.open, ...extra.open.filter((p) => !openKeys.has(`${p.marketId}:${p.side}`))];
+  const claimable = [
+    ...base.claimable,
+    ...extra.claimable.filter((p) => !claimableKeys.has(`${p.marketId}:${p.side}`)),
+  ];
   return { open, claimable };
 }

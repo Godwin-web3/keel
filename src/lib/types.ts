@@ -40,9 +40,13 @@ export type OpenPosition = {
   timeframe: WindowMarket["timeframe"];
   side: Side;
   contracts: number;
-  entryProb: number;
-  stake: number;
+  /** Unknown for a position discovered on-chain with no matching journal entry. */
+  entryProb: number | null;
+  /** Unknown for a position discovered on-chain with no matching journal entry. */
+  stake: number | null;
   status: MarketStatus;
+  /** True when this row came from an on-chain balance scan, not the local journal. */
+  fromChain?: boolean;
 };
 
 export type Claimable = {
@@ -54,6 +58,8 @@ export type Claimable = {
   contracts: number;
   estimatedPayout: number;
   resolved: boolean;
+  /** True when this row came from an on-chain balance scan, not the local journal. */
+  fromChain?: boolean;
 };
 
 export type JournalRow = {

@@ -304,6 +304,26 @@ button:disabled {
   font-weight: 600;
 }
 
+.advanced-toggle {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 4px 0;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.advanced-toggle:hover {
+  color: var(--text);
+}
+
+.advanced-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
 @media (min-width: 640px) {
   .wallet-backdrop {
     align-items: center;

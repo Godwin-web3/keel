@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { JournalRow, NetworkName, Side, WindowMarket } from "./lib/types";
+import type { Claimable, JournalRow, NetworkName, OpenPosition, Side, WindowMarket } from "./lib/types";
 import {
   ASSET_ICON,
   detectAsset,
@@ -12,7 +12,21 @@ import {
   STATUS_LABEL,
 } from "./lib/format";
 import { appendJournal, loadJournal } from "./lib/journal";
-import { connectExchange, derivePositions, disconnectExchange, listWindows, maskKey, placeStake, redeemMarket } from "./lib/sdk";
+import {
+  connectExchange,
+  connectInjectedWallet,
+  derivePositions,
+  disconnectExchange,
+  discoverOnchainPositions,
+  getAccountAddress,
+  getAuthorizedInjectedAddress,
+  hasInjectedWallet,
+  listWindows,
+  maskKey,
+  mergePositions,
+  placeStake,
+  redeemMarket,
+} from "./lib/sdk";
 import Landing from "./Landing";
 
 type Tab = "markets" | "desk";
@@ -37,7 +51,14 @@ export default function App() {
   const [privateKey, setPrivateKey] = useState("");
   const [connected, setConnected] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [injectedAvailable, setInjectedAvailable] = useState(false);
+  const [showKeyFallback, setShowKeyFallback] = useState(false);
   const [walletOpen, setWalletOpen] = useState(false);
+  const [onchainPositions, setOnchainPositions] = useState<{ open: OpenPosition[]; claimable: Claimable[] }>({
+    open: [],
+    claimable: [],
+  });
   const ticketRef = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -53,6 +74,10 @@ export default function App() {
 
   useEffect(() => {
     setJournal(loadJournal());
+  }, []);
+
+  useEffect(() => {
+    setInjectedAvailable(hasInjectedWallet());
   }, []);
 
   useEffect(() => {
@@ -93,7 +118,20 @@ export default function App() {
 
   const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
   const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
-  const { open, claimable } = useMemo(() => derivePositions(markets, journal), [markets, journal]);
+  const { open, claimable } = useMemo(() => {
+    const merged = mergePositions(derivePositions(markets, journal), onchainPositions);
+    // derivePositions already excludes a journal-known trade whose market has
+    // a matching redeem row, but an on-chain-discovered position was never a
+    // trade row to begin with — without this it would sit in claimable until
+    // the next 15s poll happens to notice the balance is now zero.
+    const redeemedKeys = new Set(
+      journal.filter((r) => r.kind === "redeem").map((r) => `${r.marketId}:${r.side ?? ""}`),
+    );
+    return {
+      open: merged.open.filter((p) => !redeemedKeys.has(`${p.marketId}:${p.side}`)),
+      claimable: merged.claimable.filter((p) => !redeemedKeys.has(`${p.marketId}:${p.side}`)),
+    };
+  }, [markets, journal, onchainPositions]);
   const totalUnclaimed = useMemo(() => claimable.reduce((sum, c) => sum + c.estimatedPayout, 0), [claimable]);
   const stats = useMemo(() => {
     let wagered = 0;
@@ -113,6 +151,19 @@ export default function App() {
     return { wagered, won, winRate: settled > 0 ? Math.round((wins / settled) * 100) : null };
   }, [journal]);
 
+  // Best-effort: scan the connected account's actual on-chain outcome-token
+  // balances so Desk shows positions even if the local journal never saw them
+  // (a fresh browser, cleared storage, a bet placed elsewhere). Never blocks
+  // the rest of the UI on failure — journal-derived positions still work.
+  async function discoverPositions(address: string) {
+    try {
+      const rows = await discoverOnchainPositions(address as `0x${string}`);
+      setOnchainPositions(rows);
+    } catch {
+      /* on-chain discovery is a bonus, not a requirement */
+    }
+  }
+
   async function refresh(silent = false) {
     if (silent) {
       if (refreshingRef.current) return;
@@ -125,6 +176,7 @@ export default function App() {
       const rows = await listWindows();
       setMarkets(rows);
       if (!selectedId && rows[0]) setSelectedId(rows[0].marketId);
+      if (walletAddress) void discoverPositions(walletAddress);
       if (!silent) setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
     } catch (err) {
       if (!silent) setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
@@ -134,9 +186,9 @@ export default function App() {
     }
   }
 
-  // Keep market status/odds live in the background — windows can be as short
-  // as a minute, so a stale "Open" badge or a missed settlement is common
-  // without this. Also what makes auto-claim below actually notice a win.
+  // Keep market status/odds (and on-chain positions) live in the background —
+  // windows can be as short as a minute, so a stale "Open" badge or a missed
+  // settlement is common without this. Also what makes auto-claim notice a win.
   useEffect(() => {
     if (!connected) return;
     const id = setInterval(() => void refresh(true), 15000);
@@ -151,9 +203,12 @@ export default function App() {
       await connectExchange({ network: net, privateKey: key });
       setConnected(true);
       setSignedIn(Boolean(key));
+      const address = getAccountAddress();
+      setWalletAddress(address);
       const rows = await listWindows();
       setMarkets(rows);
       setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
+      if (address) void discoverPositions(address);
       setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
       return true;
     } catch (err) {
@@ -168,12 +223,47 @@ export default function App() {
     }
   }
 
-  // Browsing is free, like Polymarket — load markets read-only as soon as the
-  // app opens instead of waiting on a manual "Connect" click.
-  useEffect(() => {
-    if (entered && !connected && !busy) {
-      void connectAndLoad(network);
+  async function connectInjected(): Promise<boolean> {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const address = await connectInjectedWallet(network);
+      setConnected(true);
+      setSignedIn(true);
+      setWalletAddress(address);
+      setShowKeyFallback(false);
+      const rows = await listWindows();
+      setMarkets(rows);
+      setSelectedId((prev) => prev ?? rows[0]?.marketId ?? null);
+      void discoverPositions(address);
+      setMessage({
+        kind: "ok",
+        text: `Wallet connected · ${maskKey(address)}. Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.`,
+      });
+      return true;
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      return false;
+    } finally {
+      setBusy(false);
     }
+  }
+
+  // Browsing is free, like Polymarket — load markets read-only as soon as the
+  // app opens instead of waiting on a manual "Connect" click. If the browser
+  // wallet already authorized this site (a past session), reconnect it
+  // silently instead of falling back to read-only.
+  useEffect(() => {
+    if (!entered || connected || busy) return;
+    void (async () => {
+      const authorized = await getAuthorizedInjectedAddress();
+      if (authorized) {
+        const ok = await connectInjected();
+        if (!ok) await connectAndLoad(network); // fall back to read-only rather than a blank app
+      } else {
+        await connectAndLoad(network);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entered]);
 
@@ -182,6 +272,8 @@ export default function App() {
     disconnectExchange();
     setConnected(false);
     setSignedIn(false);
+    setWalletAddress(null);
+    setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
     setSelectedId(null);
     void connectAndLoad(next);
@@ -192,8 +284,10 @@ export default function App() {
     setConnected(false);
     setSignedIn(false);
     setPrivateKey("");
+    setWalletAddress(null);
+    setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
-    setMessage({ kind: "ok", text: "Disconnected. Your wallet key was never saved anywhere." });
+    setMessage({ kind: "ok", text: "Disconnected. Nothing you connected with was ever saved anywhere." });
     void connectAndLoad(network);
   }
 
@@ -257,6 +351,7 @@ export default function App() {
         hash: result.hash,
         note,
       });
+      if (walletAddress) void discoverPositions(walletAddress);
 
       if (rollAfterRedeem) {
         const next = markets.find((m) => m.status === "trading" && m.marketId !== marketId);
@@ -353,7 +448,7 @@ export default function App() {
             </button>
           )}
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
-            {signedIn ? maskKey(privateKey) : "Connect Wallet"}
+            {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
           </button>
           <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
             View source
@@ -390,46 +485,85 @@ export default function App() {
                 <option value="mainnet">Somnia mainnet (real money)</option>
               </select>
             </div>
-            <label>Wallet key (only needed to bet — browsing is free)</label>
-            <div className="row">
-              <input
-                type="password"
-                placeholder="0x... a spending key, never your main wallet"
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-                disabled={signedIn}
-                autoComplete="off"
-              />
-            </div>
-            <div className="row">
-              <button
-                onClick={() => {
-                  void (async () => {
-                    const ok = await connectAndLoad(network, privateKey.trim() || undefined);
-                    if (ok && privateKey.trim()) setWalletOpen(false);
-                  })();
-                }}
-                disabled={busy || signedIn || !privateKey.trim()}
-              >
-                {busy ? "Connecting..." : signedIn ? "Connected" : "Connect wallet to bet"}
-              </button>
-              <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
-                Refresh
-              </button>
-              {signedIn && (
-                <button className="ghost" onClick={onDisconnect}>
-                  Disconnect
-                </button>
-              )}
-            </div>
-            <div className="muted">
-              {signedIn
-                ? `Connected · ${maskKey(privateKey)}`
-                : connected
-                  ? "Just browsing — connect a wallet above to place bets."
+
+            {signedIn ? (
+              <>
+                <div className="muted" style={{ marginBottom: 12 }}>
+                  Connected · {walletAddress ? maskKey(walletAddress) : "—"}
+                </div>
+                <div className="row">
+                  <button className="ghost" onClick={() => void refresh()} disabled={busy}>
+                    Refresh
+                  </button>
+                  <button className="ghost" onClick={onDisconnect}>
+                    Disconnect
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="row">
+                  <button onClick={() => void connectInjected()} disabled={busy || !injectedAvailable}>
+                    {busy ? "Connecting..." : "Connect Wallet"}
+                  </button>
+                  <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
+                    Refresh
+                  </button>
+                </div>
+                <p className="muted" style={{ marginTop: 4, marginBottom: 12 }}>
+                  {injectedAvailable
+                    ? "Detects MetaMask, Rabby, or whatever wallet you have installed — no key to paste."
+                    : "No wallet extension found. Install MetaMask or Rabby, or use a private key below."}
+                </p>
+
+                {injectedAvailable && (
+                  <button
+                    className="advanced-toggle"
+                    onClick={() => setShowKeyFallback((v) => !v)}
+                    type="button"
+                  >
+                    {showKeyFallback ? "Hide" : "Use a private key instead (advanced)"}
+                  </button>
+                )}
+
+                {(showKeyFallback || !injectedAvailable) && (
+                  <div className="advanced-panel">
+                    <label>Session private key</label>
+                    <div className="row">
+                      <input
+                        type="password"
+                        placeholder="0x... a spending key, never your main wallet"
+                        value={privateKey}
+                        onChange={(e) => setPrivateKey(e.target.value)}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        className="ghost"
+                        onClick={() => {
+                          void (async () => {
+                            const ok = await connectAndLoad(network, privateKey.trim() || undefined);
+                            if (ok && privateKey.trim()) setWalletOpen(false);
+                          })();
+                        }}
+                        disabled={busy || !privateKey.trim()}
+                      >
+                        {busy ? "Connecting..." : "Connect with key"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="muted" style={{ marginTop: 12 }}>
+              {!signedIn &&
+                (connected
+                  ? "Just browsing — connect a wallet to place bets."
                   : busy
                     ? "Loading markets..."
-                    : "You can look around for free. Betting needs a wallet key."}
+                    : "You can look around for free.")}
             </div>
           </div>
         </div>
@@ -594,7 +728,18 @@ export default function App() {
                   <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
                 </div>
                 <div className="muted">
-                  You bet {formatUsd(p.stake)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong> at {formatProb(p.entryProb)} odds
+                  {p.stake !== null ? (
+                    <>
+                      You bet {formatUsd(p.stake)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong> at{" "}
+                      {formatProb(p.entryProb)} odds
+                    </>
+                  ) : (
+                    <>
+                      You have {formatUsd(p.contracts, 3)} contracts on{" "}
+                      <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
+                      {p.fromChain ? " (found on-chain)" : ""}
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -608,6 +753,7 @@ export default function App() {
                   <strong className="market-name">
                     <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
                     {c.asset} <span className="muted">· {c.timeframe} · {c.side === "up" ? "Up" : "Down"}</span>
+                    {c.fromChain && <span className="muted"> · found on-chain</span>}
                   </strong>
                   <button
                     disabled={busy || !signedIn}
