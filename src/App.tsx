@@ -8,9 +8,14 @@ import Landing from "./Landing";
 type Tab = "markets" | "desk";
 
 const DEFAULT_STAKE = 10;
+const APP_HASH = "#/app";
+
+function isAppRoute(): boolean {
+  return window.location.hash === APP_HASH;
+}
 
 export default function App() {
-  const [entered, setEntered] = useState(false);
+  const [entered, setEntered] = useState(isAppRoute);
   const [tab, setTab] = useState<Tab>("markets");
   const [network, setNetwork] = useState<NetworkName>("shannon");
   const [privateKey, setPrivateKey] = useState("");
@@ -26,6 +31,28 @@ export default function App() {
   useEffect(() => {
     setJournal(loadJournal());
   }, []);
+
+  useEffect(() => {
+    function sync() {
+      setEntered(isAppRoute());
+    }
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, []);
+
+  function enterApp() {
+    history.pushState(null, "", APP_HASH);
+    setEntered(true);
+  }
+
+  function exitToLanding() {
+    history.pushState(null, "", window.location.pathname + window.location.search);
+    setEntered(false);
+  }
 
   const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
   const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
@@ -158,13 +185,13 @@ export default function App() {
   }
 
   if (!entered) {
-    return <Landing onLaunch={() => setEntered(true)} />;
+    return <Landing onLaunch={enterApp} />;
   }
 
   return (
     <div className="app">
       <nav className="app-nav">
-        <button className="wordmark" onClick={() => setEntered(false)}>
+        <button className="wordmark" onClick={exitToLanding}>
           <span className="mark">K</span>
           Keel
         </button>
