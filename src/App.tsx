@@ -46,7 +46,10 @@ export default function App() {
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [journal, setJournal] = useState<JournalRow[]>([]);
   const [rollAfterRedeem, setRollAfterRedeem] = useState(true);
+  const [autoClaim, setAutoClaim] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const refreshingRef = useRef(false);
+  const autoClaimingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setJournal(loadJournal());
@@ -91,21 +94,55 @@ export default function App() {
   const selected = markets.find((m) => m.marketId === selectedId) ?? markets[0] ?? null;
   const quote = selected ? quoteTicket("up", stake, selected.impliedUp) : null;
   const { open, claimable } = useMemo(() => derivePositions(markets, journal), [markets, journal]);
+  const totalUnclaimed = useMemo(() => claimable.reduce((sum, c) => sum + c.estimatedPayout, 0), [claimable]);
+  const stats = useMemo(() => {
+    let wagered = 0;
+    let won = 0;
+    let wins = 0;
+    let settled = 0;
+    for (const row of journal) {
+      if (row.kind === "trade" && row.stake !== undefined) wagered += row.stake;
+      if (row.kind === "redeem" && (row.result === "win" || row.result === "loss")) {
+        settled += 1;
+        if (row.result === "win") {
+          wins += 1;
+          won += row.payout ?? 0;
+        }
+      }
+    }
+    return { wagered, won, winRate: settled > 0 ? Math.round((wins / settled) * 100) : null };
+  }, [journal]);
 
-  async function refresh() {
-    setBusy(true);
-    setMessage(null);
+  async function refresh(silent = false) {
+    if (silent) {
+      if (refreshingRef.current) return;
+      refreshingRef.current = true;
+    } else {
+      setBusy(true);
+      setMessage(null);
+    }
     try {
       const rows = await listWindows();
       setMarkets(rows);
       if (!selectedId && rows[0]) setSelectedId(rows[0].marketId);
-      setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
+      if (!silent) setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      if (!silent) setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
-      setBusy(false);
+      if (silent) refreshingRef.current = false;
+      else setBusy(false);
     }
   }
+
+  // Keep market status/odds live in the background — windows can be as short
+  // as a minute, so a stale "Open" badge or a missed settlement is common
+  // without this. Also what makes auto-claim below actually notice a win.
+  useEffect(() => {
+    if (!connected) return;
+    const id = setInterval(() => void refresh(true), 15000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
 
   async function connectAndLoad(net: NetworkName, key?: string): Promise<boolean> {
     setBusy(true);
@@ -171,6 +208,7 @@ export default function App() {
         kind: "trade",
         marketId: selected.marketId,
         symbol: selected.symbol,
+        asset: selected.asset,
         side,
         stake,
         entryProb: q.entryProb,
@@ -188,7 +226,14 @@ export default function App() {
     }
   }
 
-  async function onRedeem(marketId: string, symbol: string, side: Side) {
+  async function onRedeem(
+    marketId: string,
+    symbol: string,
+    side: Side,
+    asset: WindowMarket["asset"],
+    payout?: number,
+    auto = false,
+  ) {
     setBusy(true);
     setMessage(null);
     try {
@@ -205,7 +250,10 @@ export default function App() {
         kind: "redeem",
         marketId,
         symbol,
+        asset,
+        side,
         result: result.result,
+        payout: result.result === "win" ? payout : undefined,
         hash: result.hash,
         note,
       });
@@ -217,14 +265,17 @@ export default function App() {
             kind: "roll",
             marketId: next.marketId,
             symbol: next.symbol,
+            asset: next.asset,
             note: `Lined up ${next.asset} ${next.timeframe}`,
           });
           setSelectedId(next.marketId);
-          setTab("markets");
+          if (!auto) setTab("markets");
           setJournal(loadJournal());
           setMessage({
             kind: "ok",
-            text: `Claimed. Picked your next window: ${next.asset} ${next.timeframe} — place it on Markets.`,
+            text: auto
+              ? `Auto-claimed. Next window lined up: ${next.asset} ${next.timeframe}.`
+              : `Claimed. Picked your next window: ${next.asset} ${next.timeframe} — place it on Markets.`,
           });
           setBusy(false);
           return;
@@ -232,12 +283,56 @@ export default function App() {
       }
 
       setJournal(loadJournal());
-      setMessage({ kind: "ok", text: `Claimed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
+      setMessage({
+        kind: "ok",
+        text: `${auto ? "Auto-claimed" : "Claimed"}${result.hash ? ` · ${shorten(result.hash)}` : ""}.`,
+      });
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
+  }
+
+  // Auto-claim: as soon as the periodic refresh above notices a settled bet,
+  // redeem it without waiting for the user to come back and tap Claim.
+  useEffect(() => {
+    if (!autoClaim || !signedIn) return;
+    for (const c of claimable) {
+      const key = `${c.marketId}:${c.side}`;
+      if (autoClaimingRef.current.has(key)) continue;
+      autoClaimingRef.current.add(key);
+      void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout, true).finally(() => {
+        autoClaimingRef.current.delete(key);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimable, autoClaim, signedIn]);
+
+  function shareWin(row: JournalRow) {
+    const asset = row.asset ?? detectAsset(row.symbol || row.marketId);
+    const sideWord = row.side === "up" ? "Up" : row.side === "down" ? "Down" : "";
+    const amount = row.payout !== undefined ? formatUsd(row.payout) : null;
+    const text = amount
+      ? `I called ${asset} ${sideWord} on Keel and won $${amount}! Bet on Somnia Event Contracts:`
+      : `I just won a bet on Keel! Bet on Somnia Event Contracts:`;
+    const url = `${window.location.origin}${window.location.pathname}#/app`;
+    const nav = navigator as Navigator & { share?: (data: { text: string; url: string }) => Promise<void> };
+    try {
+      const result = nav.share?.({ text, url });
+      if (result && typeof result.catch === "function") {
+        result.catch(() => openTweetIntent(text, url));
+        return;
+      }
+    } catch {
+      /* fall through to the tweet-intent link below */
+    }
+    openTweetIntent(text, url);
+  }
+
+  function openTweetIntent(text: string, url: string) {
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+    window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
   if (!entered) {
@@ -252,6 +347,11 @@ export default function App() {
           Keel
         </button>
         <div className="nav-actions">
+          {totalUnclaimed > 0 && (
+            <button className="unclaimed-pill" onClick={() => setTab("desk")}>
+              💰 ${formatUsd(totalUnclaimed)} to claim
+            </button>
+          )}
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
             {signedIn ? maskKey(privateKey) : "Connect Wallet"}
           </button>
@@ -455,6 +555,15 @@ export default function App() {
         <div className="grid">
           <section className="card">
             <h2>Your bets</h2>
+            <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+              <input
+                type="checkbox"
+                checked={autoClaim}
+                onChange={(e) => setAutoClaim(e.target.checked)}
+                disabled={!signedIn}
+              />
+              Auto-claim the instant a bet settles — no need to come back and tap Claim
+            </label>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
               <input type="checkbox" checked={rollAfterRedeem} onChange={(e) => setRollAfterRedeem(e.target.checked)} />
               After I claim, line up the next window automatically
@@ -465,7 +574,7 @@ export default function App() {
                 onClick={() => {
                   void (async () => {
                     for (const item of claimable) {
-                      await onRedeem(item.marketId, item.symbol, item.side);
+                      await onRedeem(item.marketId, item.symbol, item.side, item.asset, item.estimatedPayout);
                     }
                   })();
                 }}
@@ -500,7 +609,10 @@ export default function App() {
                     <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
                     {c.asset} <span className="muted">· {c.timeframe} · {c.side === "up" ? "Up" : "Down"}</span>
                   </strong>
-                  <button disabled={busy || !signedIn} onClick={() => void onRedeem(c.marketId, c.symbol, c.side)}>
+                  <button
+                    disabled={busy || !signedIn}
+                    onClick={() => void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout)}
+                  >
                     Claim {formatUsd(c.estimatedPayout)}
                   </button>
                 </div>
@@ -509,6 +621,20 @@ export default function App() {
           </section>
           <section className="card">
             <h2>Activity</h2>
+            <div className="stats-strip">
+              <div className="stat-tile">
+                <span>Total wagered</span>
+                <strong>${formatUsd(stats.wagered)}</strong>
+              </div>
+              <div className="stat-tile">
+                <span>Total won</span>
+                <strong>${formatUsd(stats.won)}</strong>
+              </div>
+              <div className="stat-tile">
+                <span>Win rate</span>
+                <strong>{stats.winRate === null ? "—" : `${stats.winRate}%`}</strong>
+              </div>
+            </div>
             <table>
               <thead>
                 <tr>
@@ -531,13 +657,18 @@ export default function App() {
                     <td>{new Date(row.at).toLocaleString()}</td>
                     <td>{KIND_LABEL[row.kind]}</td>
                     <td>
-                      <span className="asset-icon">{ASSET_ICON[detectAsset(row.symbol || row.marketId)]}</span>
-                      {detectAsset(row.symbol || row.marketId)}
+                      <span className="asset-icon">{ASSET_ICON[row.asset ?? detectAsset(row.symbol || row.marketId)]}</span>
+                      {row.asset ?? detectAsset(row.symbol || row.marketId)}
                     </td>
                     <td>
                       {row.side ? (row.side === "up" ? "Up" : "Down") + " · " : ""}
                       {row.stake !== undefined ? `$${formatUsd(row.stake)} · ` : ""}
                       {row.hash ? shorten(row.hash) : row.note || row.result || ""}
+                      {row.kind === "redeem" && row.result === "win" && (
+                        <button className="share-btn" onClick={() => shareWin(row)}>
+                          Share
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -62,11 +62,13 @@ export type JournalRow = {
   kind: "trade" | "redeem" | "roll" | "note";
   marketId: string;
   symbol: string;
+  asset?: WindowMarket["asset"];
   side?: Side;
   stake?: number;
   entryProb?: number;
   result?: "win" | "loss" | "void" | "pending";
   net?: number;
+  payout?: number;
   hash?: string;
   note?: string;
 };

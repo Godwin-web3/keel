@@ -475,9 +475,16 @@ export function derivePositions(
 } {
   const open: OpenPosition[] = [];
   const claimable: Claimable[] = [];
+  // A redeem is always logged as its own journal row rather than updating the
+  // original trade row in place (the journal is append-only), so a trade
+  // whose market already has a matching redeem row has already been claimed
+  // — without this, a claimed position would never leave the claimable list
+  // and auto-claim would keep retrying it forever.
+  const redeemedMarketIds = new Set(journal.filter((r) => r.kind === "redeem").map((r) => r.marketId));
 
   for (const row of journal) {
     if (row.kind !== "trade" || row.result === "win" || row.result === "loss" || row.result === "void") continue;
+    if (redeemedMarketIds.has(row.marketId)) continue;
     const market = markets.find((m) => m.marketId === row.marketId);
     const status = market?.status ?? "unknown";
     const side = row.side ?? "up";
