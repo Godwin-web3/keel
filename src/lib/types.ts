@@ -14,6 +14,9 @@ export type WindowMarket = {
   secondsLeft: number;
   status: MarketStatus;
   statusCode: number;
+  isResolved?: boolean;
+  isVoided?: boolean;
+  winningOutcome?: number | null;
   impliedUp: number | null;
   bestBid: number | null;
   bestAsk: number | null;

@@ -136,9 +136,15 @@ export async function listWindows(): Promise<WindowMarket[]> {
       const marketId = String(m.marketId || m.id || "");
       if (!marketId.startsWith("0x")) continue;
       let statusCode = Number(m.status ?? 1);
+      let isResolved: boolean | undefined;
+      let isVoided: boolean | undefined;
+      let winningOutcome: number | null | undefined;
       try {
         const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
         statusCode = Number(onchain.status);
+        isResolved = onchain.isResolved;
+        isVoided = onchain.isVoided;
+        winningOutcome = onchain.winningOutcome ?? null;
       } catch {
         /* indexer row still useful */
       }
@@ -156,6 +162,9 @@ export async function listWindows(): Promise<WindowMarket[]> {
         secondsLeft,
         status: statusFromCode(statusCode),
         statusCode,
+        isResolved,
+        isVoided,
+        winningOutcome,
         impliedUp: book.mid,
         bestBid: book.bid,
         bestAsk: book.ask,
@@ -181,10 +190,16 @@ export async function listWindows(): Promise<WindowMarket[]> {
     if (!marketId || !upSymbol) continue;
 
     let statusCode = 1;
+    let isResolved: boolean | undefined;
+    let isVoided: boolean | undefined;
+    let winningOutcome: number | null | undefined;
     try {
       if (marketId.startsWith("0x")) {
         const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
         statusCode = Number(onchain.status);
+        isResolved = onchain.isResolved;
+        isVoided = onchain.isVoided;
+        winningOutcome = onchain.winningOutcome ?? null;
       }
     } catch {
       statusCode = m.active ? 1 : 4;
@@ -204,6 +219,9 @@ export async function listWindows(): Promise<WindowMarket[]> {
       secondsLeft,
       status: statusFromCode(statusCode),
       statusCode,
+      isResolved,
+      isVoided,
+      winningOutcome,
       impliedUp: book.mid,
       bestBid: book.bid,
       bestAsk: book.ask,
@@ -270,6 +288,7 @@ export async function placeStake(args: {
 }
 
 function sideFromWinningOutcome(outcome: unknown): Side | null {
+  if (outcome === null || outcome === undefined) return null;
   const n = Number(outcome);
   if (n === 0) return "up";
   if (n === 1) return "down";
@@ -339,12 +358,21 @@ export function derivePositions(
     }
 
     if (status === "resolved" || status === "voided") {
+      const winningSide = sideFromWinningOutcome(market?.winningOutcome);
+      const estimatedPayout =
+        status === "voided"
+          ? contracts * 0.5
+          : winningSide === null
+            ? contracts
+            : winningSide === side
+              ? contracts
+              : 0;
       claimable.push({
         marketId: row.marketId,
         symbol: market?.symbol ?? row.marketId,
         side,
         contracts,
-        estimatedPayout: status === "voided" ? stake : contracts,
+        estimatedPayout,
         resolved: status === "resolved",
       });
     }
