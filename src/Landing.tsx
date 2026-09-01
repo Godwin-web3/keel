@@ -1,31 +1,31 @@
-const FEATURES = [
+import CountdownRing from "./CountdownRing";
+import PriceChart from "./PriceChart";
+import type { ProbabilityPoint } from "./lib/sdk";
+
+const DEMO_CHART: ProbabilityPoint[] = [0.5, 0.53, 0.58, 0.55, 0.6, 0.64, 0.61, 0.66, 0.69, 0.65].map((p, i) => ({
+  t: Date.now() - (10 - i) * 60_000,
+  probUp: p,
+}));
+
+const BENEFITS = [
   {
-    title: "Markets",
-    body: "Live BTC and ETH 15-minute and 1-hour windows, each reduced to a one-sentence ticket: chance, stake, redeem-if-win, max loss.",
+    title: "Windows that settle fast",
+    body: "BTC and ETH windows close in as little as 5 minutes. Call it, and find out before your coffee's cold.",
   },
   {
-    title: "Desk",
-    body: "Every open position from your local journal in one place. Redeem all on settled windows, or select the next live window to roll.",
+    title: "Know your numbers upfront",
+    body: "Every bet shows exactly what you win and exactly what you can lose, before you tap anything. No surprises.",
   },
   {
-    title: "Journal",
-    body: "Trades, redeems, and rolls stored in the browser, with transaction hashes when the SDK returns them. Nothing leaves your tab.",
+    title: "Browse for free",
+    body: "Watch live odds and countdowns without connecting a thing. Connect only when you're ready to bet.",
   },
 ];
 
 const STEPS = [
-  { title: "Connect", body: "Read-only by default. Load live windows from the Somnia indexer without a key." },
-  { title: "Read the ticket", body: "Chance to win, stake, redeem-if-win, and max loss, in one sentence." },
-  { title: "Stake", body: "Paste a session key that cannot withdraw. Writes are refused unless the market is in Trading." },
-  { title: "Redeem & roll", body: "Claim settled windows from the Desk, then roll straight into the next live window." },
-];
-
-const STACK = ["Vite", "React", "TypeScript", "@somnia-chain/markets-sdk", "viem", "Shannon testnet"];
-
-const NETWORKS = [
-  { label: "Chain ID", shannon: "50312", mainnet: "5031" },
-  { label: "Collateral", shannon: "tUSDC (6 decimals)", mainnet: "USDso" },
-  { label: "Indexer", shannon: "dev.smk.somnia.host", mainnet: "prd.smk.somnia.host" },
+  { title: "Pick a side", body: "Tap Up or Down on any live BTC or ETH window." },
+  { title: "Watch it move", body: "The odds shift live as the window counts down to close." },
+  { title: "Collect your winnings", body: "Auto-claim it, or come back and tap once. Either way, it's yours." },
 ];
 
 export default function Landing({ onLaunch }: { onLaunch: () => void }) {
@@ -47,27 +47,78 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
       </nav>
 
       <header className="hero">
-        <span className="eyebrow">Somnia × DreamDEX Event Contracts Hackathon</span>
+        <span className="eyebrow">Live on Somnia</span>
         <h1>
-          Event Contracts, <span className="accent">redeemed and rolled.</span>
+          Call it. <span className="accent">Up or Down.</span>
         </h1>
         <p>
-          Event Contract prices are Up probabilities between 0 and 1. Windows expire and respawn. Winnings do not
-          arrive in the wallet until someone redeems them. Keel is the missing layer: a fixed-line ticket for every
-          window, a desk that redeems what settled, and a journal that remembers what you did.
+          Bitcoin and Ethereum price windows that settle in minutes. Pick a side, watch it move, collect if you're
+          right.
         </p>
         <div className="hero-actions">
-          <button onClick={onLaunch}>Launch app</button>
-          <button className="ghost" onClick={onLaunch}>
-            View live windows, no key needed
-          </button>
+          <button onClick={onLaunch}>Launch app — free to browse</button>
         </div>
-        <p className="hero-note">Shannon testnet by default · session keys only · nothing uploaded</p>
+        <p className="hero-note">No sign-up · connect a wallet only when you're ready to bet</p>
       </header>
 
-      <p className="section-label">What it does</p>
+      <p className="section-label">What it looks like</p>
+      <div className="demo-grid">
+        <div className="card demo-market">
+          <div className="round-group-head">
+            <span className="asset-icon">₿</span>
+            BTC · 5m
+          </div>
+          <article className="round-card live demo-card">
+            <div className="market-top">
+              <span className="round-slot">Live</span>
+              <CountdownRing secondsLeft={134} totalSeconds={300} size={30} />
+            </div>
+            <div className="odds-bar">
+              <div className="odds-bar-up" style={{ width: "65%" }} />
+              <div className="odds-bar-down" style={{ width: "35%" }} />
+            </div>
+            <div className="odds-labels">
+              <span className="odds-up">Up 65%</span>
+              <span className="odds-down">Down 35%</span>
+            </div>
+            <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+              Closes 2m 14s · 4:12 PM
+            </div>
+          </article>
+        </div>
+
+        <div className="card demo-ticket">
+          <h2>Place your bet</h2>
+          <p className="plain">BTC · Up or Down in 5m</p>
+          <PriceChart points={DEMO_CHART} />
+          <div className="ticket-math">
+            <div>
+              <span>You win if Up</span>
+              15.38
+            </div>
+            <div>
+              <span>You win if Down</span>
+              28.57
+            </div>
+            <div>
+              <span>Most you can lose</span>
+              10.00
+            </div>
+          </div>
+          <div className="actions">
+            <button className="up" tabIndex={-1}>
+              Bet Up
+            </button>
+            <button className="down" tabIndex={-1}>
+              Bet Down
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="section-label">Why it feels different</p>
       <div className="feature-grid">
-        {FEATURES.map((f, i) => (
+        {BENEFITS.map((f, i) => (
           <div className="feature-card" key={f.title}>
             <div className="num">0{i + 1}</div>
             <h3>{f.title}</h3>
@@ -87,47 +138,8 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
         ))}
       </div>
 
-      <div className="stack-strip">
-        {STACK.map((s) => (
-          <span className="pill" key={s}>
-            {s}
-          </span>
-        ))}
-      </div>
-
-      <p className="section-label">Networks</p>
-      <div className="network-card">
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th>Shannon testnet</th>
-              <th>Mainnet</th>
-            </tr>
-          </thead>
-          <tbody>
-            {NETWORKS.map((row) => (
-              <tr key={row.label}>
-                <th>{row.label}</th>
-                <td>{row.shannon}</td>
-                <td>{row.mainnet}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="limits">
-        <h3>Known limits</h3>
-        <ul>
-          <li>Position discovery for unjournaled historical holdings needs ERC-6909 balance reads; this MVP tracks fills through the local journal plus live market status.</li>
-          <li>Indexer lag is real — status is re-read on-chain before every write.</li>
-          <li>Use a session key that cannot withdraw. It stays in this browser tab and is never uploaded.</li>
-        </ul>
-      </div>
-
       <footer className="landing-footer">
-        <span>Built for DoraHacks · deadline 8 September 2026</span>
+        <span>Built for the Somnia × DreamDEX hackathon</span>
         <div className="links">
           <a href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
             GitHub

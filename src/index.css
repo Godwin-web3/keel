@@ -991,63 +991,31 @@ th {
   margin: 0;
 }
 
-.stack-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+.demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 16px;
   margin-bottom: 72px;
 }
 
-.pill {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-dim);
-  background: var(--bg-1);
+.demo-market,
+.demo-ticket {
+  padding: 22px;
 }
 
-.network-card {
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  padding: 8px;
-  margin-bottom: 72px;
-  overflow-x: auto;
+.demo-card {
+  cursor: default;
+  width: 100%;
 }
 
-.network-card table {
-  min-width: 560px;
+.demo-card:hover {
+  border-color: var(--line-strong);
 }
 
-.network-card th,
-.network-card td {
-  padding: 13px 16px;
-}
-
-.limits {
-  background: var(--bg-1);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  padding: 22px 24px;
-  margin-bottom: 40px;
-}
-
-.limits h3 {
-  font-size: 14px;
-  margin-bottom: 10px;
-  color: var(--text-dim);
-}
-
-.limits ul {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
+@media (max-width: 720px) {
+  .demo-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .landing-footer {
@@ -1153,15 +1121,12 @@ th {
 
 .round-track {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
 }
 
 .round-card {
-  flex: none;
-  width: 220px;
+  width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: 14px 15px;
