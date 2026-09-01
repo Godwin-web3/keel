@@ -62,6 +62,23 @@ function slotLabel(index: number, status: MarketStatus): string {
   return index === 0 ? "Next" : "Later";
 }
 
+type Theme = "light" | "dark";
+const THEME_KEY = "keel.theme";
+
+function getStoredTheme(): Theme | null {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return v === "light" || v === "dark" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme: Theme | null) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+}
+
 function isAppRoute(): boolean {
   return window.location.hash === APP_HASH;
 }
@@ -93,6 +110,8 @@ export default function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingBet, setPendingBet] = useState<Side | null>(null);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [theme, setTheme] = useState<Theme | null>(() => getStoredTheme());
+  const [moreOpen, setMoreOpen] = useState(false);
   const [chartPoints, setChartPoints] = useState<ProbabilityPoint[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [leaderboardBusy, setLeaderboardBusy] = useState(false);
@@ -106,6 +125,22 @@ export default function App() {
   useEffect(() => {
     setInjectedAvailable(hasInjectedWallet());
   }, []);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const current = theme ?? (systemDark ? "dark" : "light");
+    const next: Theme = current === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* private browsing or storage disabled — the toggle still works for this session */
+    }
+  }
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -528,20 +563,54 @@ export default function App() {
           <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
           </button>
-          <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
-            View source
-          </a>
+          <button className="more-trigger" aria-label="More" onClick={() => setMoreOpen(true)}>
+            ☰
+          </button>
         </div>
       </nav>
-      <header className="top">
-        <div className="brand">
-          <h1>Keel</h1>
-          <p>
-            Bet on whether Bitcoin or Ethereum goes up or down in the next few minutes. Come back
-            after it settles to collect what you won.
-          </p>
+
+      {moreOpen && (
+        <div className="wallet-backdrop" onClick={() => setMoreOpen(false)}>
+          <div className="wallet-sheet more-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="wallet-sheet-head">
+              <h2>More</h2>
+              <button className="ghost" onClick={() => setMoreOpen(false)}>
+                Close
+              </button>
+            </div>
+            <button
+              className="more-item"
+              onClick={() => {
+                setTab("leaderboard");
+                setMoreOpen(false);
+                if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
+              }}
+            >
+              🏆 Leaderboard
+            </button>
+            <button
+              className="more-item"
+              onClick={() => {
+                toggleTheme();
+                setMoreOpen(false);
+              }}
+            >
+              {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
+                ? "☀ Switch to light"
+                : "🌙 Switch to dark"}
+            </button>
+            <a
+              className="more-item"
+              href="https://github.com/Godwin-web3/keel"
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMoreOpen(false)}
+            >
+              View source
+            </a>
+          </div>
         </div>
-      </header>
+      )}
 
       {walletOpen && (
         <div className="wallet-backdrop" onClick={() => setWalletOpen(false)}>
@@ -698,15 +767,6 @@ export default function App() {
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
           My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
         </button>
-        <button
-          className={tab === "leaderboard" ? "active" : ""}
-          onClick={() => {
-            setTab("leaderboard");
-            if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
-          }}
-        >
-          Leaderboard
-        </button>
       </div>
 
       {tab === "markets" && (
@@ -768,7 +828,9 @@ export default function App() {
             {!selected && <p className="muted">Pick a window on the left.</p>}
             {selected && quote && (
               <>
-                <p className="plain">{plainLanguage(selected, stake, "up")}</p>
+                <p className="plain">
+                  {selected.asset === "OTHER" ? "This market" : selected.asset} · Up or Down in {selected.timeframe}
+                </p>
                 <PriceChart points={chartPoints} />
                 <label className="stake-label">
                   How much do you want to bet?

@@ -30,6 +30,56 @@
   font-family: var(--font-body);
 }
 
+/* System dark preference, unless the user picked "light" explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0c0f;
+    --bg-1: #131417;
+    --bg-2: #17181c;
+    --bg-3: #1c1d22;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --text: #f2f3f5;
+    --text-dim: #b8bac0;
+    --muted: #83868d;
+    --accent: #4c86ff;
+    --accent-ink: #ffffff;
+    --accent-dim: rgba(76, 134, 255, 0.15);
+    --up: #22c55e;
+    --up-dim: rgba(34, 197, 94, 0.14);
+    --down: #f87171;
+    --down-dim: rgba(248, 113, 113, 0.14);
+    --warn: #fbbf24;
+    --warn-dim: rgba(251, 191, 36, 0.14);
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 24px -16px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Explicit user choice always wins over the system preference. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0c0f;
+  --bg-1: #131417;
+  --bg-2: #17181c;
+  --bg-3: #1c1d22;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #f2f3f5;
+  --text-dim: #b8bac0;
+  --muted: #83868d;
+  --accent: #4c86ff;
+  --accent-ink: #ffffff;
+  --accent-dim: rgba(76, 134, 255, 0.15);
+  --up: #22c55e;
+  --up-dim: rgba(34, 197, 94, 0.14);
+  --down: #f87171;
+  --down-dim: rgba(248, 113, 113, 0.14);
+  --warn: #fbbf24;
+  --warn-dim: rgba(251, 191, 36, 0.14);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 24px -16px rgba(0, 0, 0, 0.6);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -224,6 +274,47 @@ button:disabled {
   color: var(--up);
   background: var(--up-dim);
   border-color: transparent;
+}
+
+.more-trigger {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  padding: 7px 12px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.more-trigger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.more-sheet {
+  max-width: 300px;
+}
+
+.more-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.more-item:hover {
+  border-color: var(--line-strong);
+  filter: none;
 }
 
 .unclaimed-pill {
