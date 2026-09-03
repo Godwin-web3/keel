@@ -80,7 +80,7 @@ export type Claimable = {
 export type JournalRow = {
   id: string;
   at: string;
-  kind: "trade" | "redeem" | "roll" | "note" | "parlay" | "run";
+  kind: "trade" | "redeem" | "roll" | "note" | "parlay" | "run" | "seal" | "unseal";
   marketId: string;
   symbol: string;
   asset?: WindowMarket["asset"];

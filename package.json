@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "compile:seal": "node scripts/compile-seal.mjs"
   },
   "dependencies": {
     "@somnia-chain/markets-sdk": "^0.28.1",
@@ -19,6 +20,7 @@
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
+    "solc": "^0.8.24",
     "typescript": "^5.9.2",
     "vite": "^7.1.3"
   }

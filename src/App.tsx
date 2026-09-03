@@ -54,6 +54,7 @@ import {
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
+import { canSeal, commitSeal, loadSeals, markSealPlaced, refundSeal, revealSeal, type LocalSeal } from "./lib/seal";
 import PriceChart from "./PriceChart";
 import Landing from "./Landing";
 import RunCard from "./RunCard";
@@ -74,6 +75,8 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   note: "Note",
   parlay: "Parlay",
   run: "Run",
+  seal: "Sealed",
+  unseal: "Unsealed",
 };
 
 type Theme = "light" | "dark";
@@ -121,6 +124,8 @@ export default function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingBet, setPendingBet] = useState<PendingBet>(null);
   const [parlayOn, setParlayOn] = useState(false);
+  const [sealOn, setSealOn] = useState(true);
+  const [seals, setSeals] = useState<LocalSeal[]>([]);
   const [parlaySideB, setParlaySideB] = useState<Side>("down");
   const [run, setRun] = useState<RunState | null>(null);
   const [runStake, setRunStake] = useState(10);
@@ -146,7 +151,8 @@ export default function App() {
   useEffect(() => {
     setJournal(loadJournal());
     setRun(loadRun());
-  }, []);
+    setSeals(loadSeals(network));
+  }, [network]);
 
   useEffect(() => {
     saveRun(run);
@@ -589,6 +595,97 @@ export default function App() {
     }
   }
 
+  async function onSeal(side: Side) {
+    if (!selected) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const row = await commitSeal({ network, market: selected, side, amount: stake });
+      setSeals(loadSeals(network));
+      appendJournal({
+        kind: "seal",
+        marketId: selected.marketId,
+        symbol: selected.symbol,
+        asset: selected.asset,
+        side,
+        stake: stake,
+        hash: row.commitHash,
+        note: `Sealed ${selected.asset}. Side is hidden on-chain until you unseal.`,
+      });
+      setJournal(loadJournal());
+      setTab("desk");
+      setMessage({
+        kind: "ok",
+        text: `Sealed. The book cannot see ${side === "up" ? "Up" : "Down"} until you unseal.`,
+      });
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUnseal(row: LocalSeal) {
+    const market = markets.find((m) => m.marketId === row.marketId);
+    setBusy(true);
+    setMessage(null);
+    try {
+      await revealSeal(network, row);
+      if (!market) {
+        setSeals(loadSeals(network));
+        setMessage({ kind: "ok", text: "Unsealed. Place the bet when the window is open." });
+        return;
+      }
+      const placed = await placeStake({ market, side: row.side, stake: row.amount });
+      markSealPlaced(network, row.id, placed.hash);
+      setSeals(loadSeals(network));
+      appendJournal({
+        kind: "unseal",
+        marketId: row.marketId,
+        symbol: row.symbol,
+        asset: row.asset,
+        side: row.side,
+        stake: row.amount,
+        hash: placed.hash,
+        note: "Unsealed and placed on DreamDEX.",
+      });
+      setJournal(loadJournal());
+      setMessage({
+        kind: "ok",
+        text: `Unsealed and placed${placed.hash ? ` · ${shorten(placed.hash)}` : ""}.`,
+      });
+    } catch (err) {
+      setSeals(loadSeals(network));
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRefundSeal(row: LocalSeal) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await refundSeal(network, row);
+      setSeals(loadSeals(network));
+      appendJournal({
+        kind: "seal",
+        marketId: row.marketId,
+        symbol: row.symbol,
+        asset: row.asset,
+        side: row.side,
+        stake: row.amount,
+        note: "Missed the unseal window. Money returned.",
+      });
+      setJournal(loadJournal());
+      setMessage({ kind: "ok", text: "Returned. The side was never shown." });
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onParlay(aSide: Side, bSide: Side) {
     if (!selected || !parlayPartner) return;
     const q = quoteParlay(selected, aSide, parlayPartner, bSide, stake);
@@ -995,11 +1092,26 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={parlayOn}
-                      onChange={(e) => setParlayOn(e.target.checked)}
+                      onChange={(e) => {
+                        setParlayOn(e.target.checked);
+                        if (e.target.checked) setSealOn(false);
+                      }}
                     />
                     Also bet on {parlayPartner.asset} in the same {formatWindow(parlayPartner.timeframe)}. You only get paid if both are right.
                   </label>
                 )}
+                <label className="parlay-toggle">
+                  <input
+                    type="checkbox"
+                    checked={sealOn && !parlayOn}
+                    onChange={(e) => {
+                      setSealOn(e.target.checked);
+                      if (e.target.checked) setParlayOn(false);
+                    }}
+                    disabled={!canSeal(selected) && !sealOn}
+                  />
+                  Seal this bet. The book cannot see Up or Down until you unseal.
+                </label>
                 {parlayOn && parlayPartner && (
                   <div className="parlay-sides">
                     <span className="muted">{parlayPartner.asset} side</span>
@@ -1086,7 +1198,9 @@ export default function App() {
                     ? "This one isn't open right now."
                     : !signedIn
                       ? "Connect your wallet to place this."
-                      : "You only lose what you put in."}
+                      : sealOn
+                        ? "Seal it first. Nobody sees your side until you unseal."
+                        : "You only lose what you put in."}
                 </p>
               </>
             )}
@@ -1118,10 +1232,11 @@ export default function App() {
                     onClick={() => {
                       const side = pendingBet.side;
                       closeBetSheet();
-                      void onTrade(side);
+                      if (sealOn) void onSeal(side);
+                      else void onTrade(side);
                     }}
                   >
-                    Confirm {pendingBet.side === "up" ? "Up" : "Down"}
+                    {sealOn ? `Seal ${pendingBet.side === "up" ? "Up" : "Down"}` : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
@@ -1312,6 +1427,47 @@ export default function App() {
         <div className="grid tab-enter">
           <section className="card">
             <h2>Your bets</h2>
+            {seals.some((s) => s.status === "sealed") && (
+              <>
+                <h3 className="muted">Sealed</h3>
+                <p className="muted" style={{ marginTop: -6, marginBottom: 10 }}>
+                  Hidden on-chain. Unseal to place it on DreamDEX. Miss the time and the money comes back.
+                </p>
+                {seals
+                  .filter((s) => s.status === "sealed")
+                  .map((s) => {
+                    const left = s.revealBy - nowMs / 1000;
+                    const late = left <= 0;
+                    return (
+                      <div key={s.id} className="market">
+                        <div className="market-top">
+                          <strong className="market-name">
+                            <span className="asset-icon">{ASSET_ICON[s.asset]}</span>
+                            {s.asset}{" "}
+                            <span className="muted">
+                              · {formatWindow(s.timeframe)} · {s.side === "up" ? "Up" : "Down"} · {money(s.amount, network)}
+                            </span>
+                          </strong>
+                          {late ? (
+                            <button disabled={busy || !signedIn} onClick={() => void onRefundSeal(s)}>
+                              Get money back
+                            </button>
+                          ) : (
+                            <button disabled={busy || !signedIn} onClick={() => void onUnseal(s)}>
+                              Unseal
+                            </button>
+                          )}
+                        </div>
+                        <div className="muted">
+                          {late
+                            ? "Time to unseal has passed. The side was never shown."
+                            : `Unseal in the next ${Math.max(0, Math.floor(left / 60))}m ${String(Math.max(0, Math.floor(left % 60))).padStart(2, "0")}s`}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </>
+            )}
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <input
                 type="checkbox"

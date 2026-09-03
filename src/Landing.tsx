@@ -45,13 +45,13 @@ export default function Landing({
       </nav>
 
       <header className="land-hero">
-        <h1>Bet if Bitcoin or Ethereum goes up or down.</h1>
+        <h1>The book can't see your side.</h1>
         <p>
-          Pick a side. Combine two coins. Or keep going until you hit a limit. You get paid in USDso when the round
-          ends.
+          Seal the bet first. Up or Down stays a hash until you unseal it onto DreamDEX. Then you get paid in USDso when
+          the round ends.
         </p>
         <div className="hero-actions">
-          <button onClick={() => onLaunch()}>Start betting</button>
+          <button onClick={() => onLaunch()}>Seal a bet</button>
         </div>
       </header>
 
@@ -85,12 +85,12 @@ export default function Landing({
 
       <ul className="land-points">
         <li>
-          <strong>Two coins, one bet.</strong>
-          <span>BTC and ETH in the same round. You only get paid if both are right.</span>
+          <strong>Seal first.</strong>
+          <span>Lock the money with a hash. Nobody sees Up or Down until you unseal.</span>
         </li>
         <li>
-          <strong>A run that stops itself.</strong>
-          <span>Set cash out, stop loss, and max rounds. Keel keeps going until a limit hits.</span>
+          <strong>Then it hits DreamDEX.</strong>
+          <span>Unseal places the real Event Contract. Miss the time and the money comes back.</span>
         </li>
         <li>
           <strong>Paid when it ends.</strong>

@@ -1,4 +1,4 @@
-import { createWalletClient, custom } from "viem";
+import { createPublicClient, createWalletClient, custom } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
@@ -287,6 +287,27 @@ export function isConnected(): boolean {
 
 export function getAccountAddress(): `0x${string}` | null {
   return accountAddress;
+}
+
+export async function getTradeContext(network: NetworkName) {
+  const provider = getInjectedProvider();
+  if (!provider) throw new Error("No wallet found. Connect MetaMask first.");
+  const address = accountAddress ?? (await getAuthorizedInjectedAddress());
+  if (!address) throw new Error("Connect a wallet first.");
+  const { chain, addresses } = await resolveNetworkConfig(network);
+  if (!chain) throw new Error("Somnia chain not found.");
+  const collateral = (addresses.collateral ?? addresses.testUsdc) as `0x${string}` | undefined;
+  if (!collateral) throw new Error("No collateral token on this network.");
+  const walletClient = createWalletClient({
+    account: address,
+    chain: chain as any,
+    transport: custom(provider),
+  });
+  const publicClient = createPublicClient({
+    chain: chain as any,
+    transport: custom(provider),
+  });
+  return { walletClient, publicClient, account: address, collateral };
 }
 
 export function disconnectExchange(): void {
