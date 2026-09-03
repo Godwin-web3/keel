@@ -56,7 +56,7 @@ export default function RunCard({
     <section className="card run-card">
       <h2>Run</h2>
       <p className="muted" style={{ marginTop: -4, marginBottom: 14 }}>
-        The venue sells one window. A run is N windows with rails the venue cannot halt.
+        Repeat the next window until a limit you set. Cash out, stop, or max rounds — then it stops.
       </p>
 
       {run && (

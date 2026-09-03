@@ -51,7 +51,6 @@ import {
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
-import Landing from "./Landing";
 import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
 import RunCard from "./RunCard";
@@ -62,9 +61,8 @@ type HistoryFilter = "all" | "won" | "lost" | "collected";
 type PendingBet = { kind: "single"; side: Side } | { kind: "parlay"; a: Side; b: Side } | null;
 
 const DEFAULT_STAKE = 10;
-const APP_HASH = "#/app";
 const KIND_LABEL: Record<JournalRow["kind"], string> = {
-  trade: "Bet placed",
+  trade: "Filled",
   redeem: "Claimed",
   roll: "Rolled",
   note: "Note",
@@ -103,12 +101,7 @@ function applyTheme(theme: Theme | null) {
   document.documentElement.dataset.theme = theme ?? "dark";
 }
 
-function isAppRoute(): boolean {
-  return window.location.hash === APP_HASH;
-}
-
 export default function App() {
-  const [entered, setEntered] = useState(isAppRoute);
   const [tab, setTab] = useState<Tab>("markets");
   const [network, setNetwork] = useState<NetworkName>("shannon");
   const [connected, setConnected] = useState(false);
@@ -184,28 +177,6 @@ export default function App() {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    function sync() {
-      setEntered(isAppRoute());
-    }
-    window.addEventListener("popstate", sync);
-    window.addEventListener("hashchange", sync);
-    return () => {
-      window.removeEventListener("popstate", sync);
-      window.removeEventListener("hashchange", sync);
-    };
-  }, []);
-
-  function enterApp() {
-    history.pushState(null, "", APP_HASH);
-    setEntered(true);
-  }
-
-  function exitToLanding() {
-    history.pushState(null, "", window.location.pathname + window.location.search);
-    setEntered(false);
-  }
 
   function selectMarket(id: string) {
     setSelectedId(id);
@@ -375,7 +346,7 @@ export default function App() {
       const rows = await listWindows();
       setMarkets(rows);
       if (walletAddress) void discoverPositions(walletAddress);
-      if (!silent) setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
+      if (!silent) setMessage({ kind: "ok", text: `${rows.length} windows.` });
     } catch (err) {
       if (!silent) setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -468,7 +439,7 @@ export default function App() {
       setWalletAddress(null);
       const rows = await listWindows();
       setMarkets(rows);
-      setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
+      setMessage({ kind: "ok", text: `${rows.length} windows.` });
       return true;
     } catch (err) {
       setConnected(false);
@@ -497,7 +468,7 @@ export default function App() {
       setWalletOpen(false);
       setMessage({
         kind: "ok",
-        text: `Wallet connected · ${maskKey(address)}. Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.`,
+        text: `Connected · ${maskKey(address)}. ${rows.length} windows.`,
       });
       return true;
     } catch (err) {
@@ -508,23 +479,19 @@ export default function App() {
     }
   }
 
-  // Browsing is free, like Polymarket — load markets read-only as soon as the
-  // app opens instead of waiting on a manual "Connect" click. If the browser
-  // wallet already authorized this site (a past session), reconnect it
-  // silently instead of falling back to read-only.
   useEffect(() => {
-    if (!entered || connected || busy) return;
+    if (connected || busy) return;
     void (async () => {
       const authorized = await getAuthorizedInjectedAddress();
       if (authorized) {
         const ok = await connectInjected();
-        if (!ok) await connectAndLoad(network); // fall back to read-only rather than a blank app
+        if (!ok) await connectAndLoad(network);
       } else {
         await connectAndLoad(network);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entered]);
+  }, []);
 
   function onNetworkChange(next: NetworkName) {
     setNetwork(next);
@@ -816,9 +783,9 @@ export default function App() {
     const sideWord = row.side === "up" ? "Up" : row.side === "down" ? "Down" : "";
     const amount = row.payout !== undefined ? formatUsd(row.payout) : null;
     const text = amount
-      ? `I called ${asset} ${sideWord} on Keel and won $${amount}! Bet on Somnia Event Contracts:`
-      : `I just won a bet on Keel! Bet on Somnia Event Contracts:`;
-    const url = `${window.location.origin}${window.location.pathname}#/app`;
+      ? `BTC/ETH window on Keel: ${asset} ${sideWord} paid $${amount}`
+      : `Settled a window on Keel`;
+    const url = `${window.location.origin}${window.location.pathname}`;
     const nav = navigator as Navigator & { share?: (data: { text: string; url: string }) => Promise<void> };
     try {
       const result = nav.share?.({ text, url });
@@ -837,19 +804,16 @@ export default function App() {
     window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
-  if (!entered) {
-    return <Landing onLaunch={enterApp} />;
-  }
-
   return (
     <div className="app">
       <nav className="app-nav">
-        <button className="wordmark" onClick={exitToLanding}>
+        <span className="wordmark">
           <span className="mark" aria-hidden>
             <KeelMark />
           </span>
           Keel
-        </button>
+          <span className="net-chip">{network === "shannon" ? "Shannon" : "Somnia"}</span>
+        </span>
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
             <button className="unclaimed-pill" onClick={() => setTab("desk")}>
@@ -898,7 +862,7 @@ export default function App() {
                     onClick={() => setMoreOpen(false)}
                   >
                     <ExternalLinkIcon />
-                    View source
+                    GitHub
                   </a>
                 </div>
               </>
@@ -906,6 +870,9 @@ export default function App() {
           </div>
         </div>
       </nav>
+      {network === "shannon" && (
+        <div className="net-banner">Shannon testnet · tUSDC collateral · settlement is on-chain</div>
+      )}
 
       {walletOpen && (
         <div className="wallet-backdrop" onClick={() => setWalletOpen(false)}>
@@ -923,8 +890,8 @@ export default function App() {
                 onChange={(e) => onNetworkChange(e.target.value as NetworkName)}
                 disabled={signedIn || busy}
               >
-                <option value="shannon">Test network (practice money)</option>
-                <option value="mainnet">Somnia mainnet (real money)</option>
+                <option value="shannon">Shannon testnet</option>
+                <option value="mainnet">Somnia</option>
               </select>
             </div>
 
@@ -971,10 +938,10 @@ export default function App() {
             <div className="muted" style={{ marginTop: 12 }}>
               {!signedIn &&
                 (connected
-                  ? "Browsing live windows — connect to parlay, run, or claim."
+                  ? "Connected as a reader — connect a wallet to trade."
                   : busy
-                    ? "Loading markets..."
-                    : "You can look around for free.")}
+                    ? "Loading windows..."
+                    : "Windows load without a wallet.")}
             </div>
           </div>
         </div>
@@ -984,7 +951,7 @@ export default function App() {
         <div className="confirm-backdrop" onClick={closeBetSheet}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
-              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm parlay" : "Confirm your bet") : "Place your bet"}</h2>
+              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm parlay" : "Confirm") : "Ticket"}</h2>
               <button className="ghost" onClick={closeBetSheet}>
                 Close
               </button>
@@ -1004,7 +971,7 @@ export default function App() {
                       checked={parlayOn}
                       onChange={(e) => setParlayOn(e.target.checked)}
                     />
-                    Parlay with {parlayPartner.asset} {parlayPartner.timeframe} — both must hit. Venue does not list this.
+                    Parlay {parlayPartner.asset} {parlayPartner.timeframe} in the same ticket. Pays only if both sides hit.
                   </label>
                 )}
                 {parlayOn && parlayPartner && (
@@ -1019,7 +986,7 @@ export default function App() {
                   </div>
                 )}
                 <label className="stake-label">
-                  How much do you want to bet?
+                  Stake
                   <div className="stake-input">
                     <span>$</span>
                     <input
@@ -1043,7 +1010,7 @@ export default function App() {
                         {Math.round(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).implied * 100)}%
                       </div>
                       <div>
-                        <span>Most you can lose</span>
+                        <span>Max loss</span>
                         {formatUsd(stake)}
                       </div>
                     </>
@@ -1058,7 +1025,7 @@ export default function App() {
                         {formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
                       </div>
                       <div>
-                        <span>Most you can lose</span>
+                        <span>Max loss</span>
                         {formatUsd(stake)}
                       </div>
                     </>
@@ -1092,10 +1059,8 @@ export default function App() {
                   {selected.status !== "trading"
                     ? "This window isn't open for new bets right now."
                     : !signedIn
-                      ? "Connect a wallet above to place a bet."
-                      : parlayOn
-                        ? "Stake splits across both windows. You only get paid if both sides hit."
-                        : "You can only lose what you bet — never more."}
+                      ? "Connect a wallet to trade."
+                      : "You can only lose the stake."}
                 </p>
               </>
             )}
@@ -1116,7 +1081,7 @@ export default function App() {
                     {formatUsd(quoteTicket(pendingBet.side, stake, selected.impliedUp).redeemIfWin)}
                   </div>
                   <div>
-                    <span>Most you can lose</span>
+                    <span>Max loss</span>
                     {formatUsd(stake)}
                   </div>
                 </div>
@@ -1194,7 +1159,7 @@ export default function App() {
           Run{run?.status === "running" ? " · live" : ""}
         </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
-          My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
+          Positions{claimable.length > 0 ? ` · ${claimable.length}` : ""}
         </button>
       </div>
 
@@ -1225,7 +1190,10 @@ export default function App() {
 
       {tab === "markets" && (
         <section className="card markets-full">
-          <h2>Live windows</h2>
+          <h2>Windows</h2>
+          <p className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
+            BTC and ETH event contracts. Tap a live window to trade or parlay.
+          </p>
           {!busy && !connected && <p className="muted">Couldn't load windows. Try refreshing.</p>}
           {busy && markets.length === 0 && (
             <div className="market-list">
@@ -1297,7 +1265,7 @@ export default function App() {
       {tab === "desk" && (
         <div className="grid tab-enter">
           <section className="card">
-            <h2>Your bets</h2>
+            <h2>Positions</h2>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <input
                 type="checkbox"
@@ -1305,7 +1273,7 @@ export default function App() {
                 onChange={(e) => setAutoClaim(e.target.checked)}
                 disabled={!signedIn}
               />
-              Reactive claim — Keel watches settlement on your open windows and pulls winners. Losing sides are skipped. Voids redeem both sides.
+              Claim winners automatically when they settle. Losers pay 0 and are skipped. Voids return both sides.
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button
@@ -1410,7 +1378,7 @@ export default function App() {
                   <tr>
                     <td colSpan={4} className="muted">
                       {journal.length === 0
-                        ? "Nothing yet. Your bets, claims, and rolls show up here, saved only on this device."
+                        ? "No fills yet. Activity stays on this device."
                         : "Nothing matches this filter."}
                     </td>
                   </tr>
