@@ -1,27 +1,35 @@
 # Keel
 
-Event Contracts with a fixed line. Stake in plain language. Redeem what settled. Roll the next window.
+**Event Contracts that actually pay out.**
 
-Built for the Somnia × DreamDEX Event Contracts Hackathon (DoraHacks). Deadline 8 September 2026.
+Stake Up or Down on BTC/ETH windows in plain language. When the window settles, Keel finds the USDso sitting in finalized markets and pulls it back.
+
+Live: https://keel-black-phi.vercel.app  
+Repo: https://github.com/Godwin-web3/keel  
+Hackathon: Somnia × DreamDEX Event Contracts (DoraHacks) — deadline 8 September 2026.
+
+## The problem
+
+DreamDEX Event Contracts do not send winnings to the wallet on expiry. Positions sit in ERC-6909 outcome tokens on settled windows until someone calls redeem. `loadMarkets()` skips finalized markets, so a naïve app reports nothing to claim while the money is still on-chain.
+
+Keel is that missing layer.
 
 ## What it does
 
-Event Contract prices are Up probabilities between 0 and 1. Windows expire and respawn. Winnings do not arrive in the wallet until someone redeems.
-
-Keel is the missing layer:
-
-1. **Markets** — live BTC/ETH 15-minute and 1-hour windows with a one-sentence ticket: chance, stake, redeem-if-win, max loss.
-2. **Desk** — open positions from the local journal, **Redeem all** on settled windows, optional select of the next live window for a roll.
-3. **Journal** — trades, redeems, and rolls stored in the browser, with transaction hashes when the SDK returns them.
+1. **Markets** — live BTC/ETH windows, odds bar, countdown, probability chart scoped to the window (not the recycled pool's whole history). Ticket copy is “bet $10, win about $X, lose at most $10.”
+2. **Edge line** — book implied-Up vs how far spot has already moved this window (`Book 62% Up · spot already +0.4% this window`).
+3. **Desk** — open and claimable positions from the local journal **and** on-chain (`getPortfolio` + `getClaimable` + finalized scan). Survives a new browser.
+4. **Auto-claim** — opt-in redeem of **winners** as soon as settlement is visible. Losing sides are skipped (redeeming them succeeds and pays 0). Voids redeem both sides at 0.5.
+5. **Down is a buy of `#NO`**, not a sell of `#YES`.
+6. **Writes gated** on on-chain status `1` (Trading). IOC so unfilled size does not rest.
 
 ## Stack
 
 - Vite + React + TypeScript
 - `@somnia-chain/markets-sdk` ≥ 0.28.1
-- `viem`
-- Shannon testnet (chain ID 50312) by default; mainnet selectable
-
-Writes are gated on on-chain market status `1` (Trading). Market and pool addresses are never hardcoded.
+- viem
+- Shannon (50312) by default; mainnet selectable
+- Injected wallet (MetaMask / Rabby) plus session-key fallback
 
 ## Run
 
@@ -32,39 +40,28 @@ npm install
 npm run dev
 ```
 
-Open the printed localhost URL. Click **Connect & load windows** for read-only market data.
-
-To trade or redeem, paste a **session / trading** private key only. Do not use a wallet that holds the rest of your funds. The key stays in React state in this browser tab; it is not uploaded.
-
-Docs:
-
-- https://docs.dreamdex.io/developers/event-contracts
-- https://docs.dreamdex.io/developers/event-contracts/recipes
-- https://github.com/somnia-chain/dreamdex-bot-kit
-
-## Networks
-
-| | Shannon testnet | Mainnet |
-|---|---|---|
-| Chain ID | 50312 | 5031 |
-| Indexer | https://dev.smk.somnia.host/v1/graphql | https://prd.smk.somnia.host/v1/graphql |
-| WS RPC | wss://api.infra.testnet.somnia.network/ws | wss://api.infra.mainnet.somnia.network/ws |
-| Collateral | tUSDC (6 decimals) | USDso |
+Browse with no wallet. Connect to bet. Use a throwaway Shannon key if you skip the injected wallet — never a key that holds the rest of your funds.
 
 ## Demo script
 
-1. Connect on Shannon without a key. Show live windows and read one ticket aloud.
-2. Connect with a funded test key. Stake a small Up or Down.
-3. After a window resolves, open Desk and Redeem.
-4. With roll enabled, the next Trading window is selected automatically.
+1. Open the live URL. Markets load without connecting.
+2. Connect Rabby (Shannon). Stake a small Up or Down. Hash lands in Activity.
+3. Wait for settle (or pick a window that already resolved). Unclaimed pill lights up.
+4. Auto-claim or tap Claim. Explorer hash. Balance moves.
+5. New tab, reconnect. Desk still shows on-chain leftovers. Sweep.
 
-## Known limits
+## Networks
 
-- Position discovery for unjournaled historical holdings needs ERC-6909 balance reads. This MVP tracks fills through the local journal plus live market status.
-- `redeemOutcome` is called through the trader/client surface. If your installed SDK names the method differently, adjust `src/lib/sdk.ts`.
-- Indexer lag is real. Status is re-read on-chain before every write.
+| | Shannon | Mainnet |
+|---|---|---|
+| Chain ID | 50312 | 5031 |
+| Indexer | https://dev.smk.somnia.host/v1/graphql | https://prd.smk.somnia.host/v1/graphql |
+| Collateral | tUSDC (6 decimals) | USDso (18 decimals) |
 
-## DoraHacks
+## Docs
 
-- Title: **Keel — Event Contracts, redeem and roll**
-- Repo: https://github.com/Godwin-web3/keel
+- https://docs.dreamdex.io/developers/event-contracts
+- https://docs.dreamdex.io/developers/event-contracts/recipes
+- https://docs.dreamdex.io/developers/event-contracts/gotchas
+- https://github.com/somnia-chain/dreamdex-bot-kit
+- [SDK-FEEDBACK.md](./SDK-FEEDBACK.md) — notes for the optional hackathon feedback report

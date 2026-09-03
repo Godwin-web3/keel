@@ -782,6 +782,13 @@ button:disabled {
   border: 0;
 }
 
+.ticket-edge {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
 .ticket-math {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

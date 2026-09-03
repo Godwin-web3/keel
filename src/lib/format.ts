@@ -125,6 +125,22 @@ export function plainLanguage(market: WindowMarket, stake: number, side: Side): 
   return `${asset} looks like ${upPct} likely to finish Up. Bet ${sideWord}: put in ${formatUsd(stake)}, and if you're right you get about ${formatUsd(q.redeemIfWin)} back. If you're wrong, you lose the ${formatUsd(stake)} — never more.`;
 }
 
+/** Book odds vs how far spot has already moved inside this window. */
+export function formatEdge(impliedUp: number | null, spotMovePct: number | null): string {
+  const book =
+    impliedUp === null || !Number.isFinite(impliedUp) ? "Book —" : `Book ${Math.round(impliedUp * 100)}% Up`;
+  if (spotMovePct === null || !Number.isFinite(spotMovePct)) return book;
+  const sign = spotMovePct > 0 ? "+" : "";
+  return `${book} · spot already ${sign}${spotMovePct.toFixed(2)}% this window`;
+}
+
+export function spotMovePct(spot: number | null, strike: number | null): number | null {
+  if (spot === null || strike === null || !Number.isFinite(spot) || !Number.isFinite(strike) || strike === 0) {
+    return null;
+  }
+  return ((spot - strike) / strike) * 100;
+}
+
 export function shorten(id: string, size = 6): string {
   if (!id) return "—";
   if (id.length <= size * 2 + 2) return id;

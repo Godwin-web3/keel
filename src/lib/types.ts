@@ -8,9 +8,11 @@ export type WindowMarket = {
   marketId: string;
   symbol: string;
   upSymbol: string;
+  downSymbol: string;
   asset: "BTC" | "ETH" | "OTHER";
   timeframe: string;
   expirySec: number;
+  tradingStartSec: number;
   secondsLeft: number;
   status: MarketStatus;
   statusCode: number;
@@ -21,6 +23,9 @@ export type WindowMarket = {
   bestBid: number | null;
   bestAsk: number | null;
   openingPriceLabel: string;
+  /** Numeric strike / window-open price when the indexer provides one. */
+  strike: number | null;
+  poolAddress: string;
   raw: unknown;
 };
 

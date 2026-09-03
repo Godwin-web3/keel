@@ -4,11 +4,13 @@ import {
   ASSET_ICON,
   detectAsset,
   formatCloseLabel,
+  formatEdge,
   formatProb,
   formatUsd,
   plainLanguage,
   quoteTicket,
   shorten,
+  spotMovePct,
   STATUS_LABEL,
 } from "./lib/format";
 import { appendJournal, loadJournal } from "./lib/journal";
@@ -18,6 +20,8 @@ import {
   derivePositions,
   disconnectExchange,
   discoverOnchainPositions,
+  fetchBook,
+  fetchSpotPrice,
   getAccountAddress,
   getAuthorizedInjectedAddress,
   getMarketProbabilityHistory,
@@ -116,6 +120,7 @@ export default function App() {
   const [chartPoints, setChartPoints] = useState<ProbabilityPoint[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [leaderboardBusy, setLeaderboardBusy] = useState(false);
+  const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const refreshingRef = useRef(false);
   const autoClaimingRef = useRef<Set<string>>(new Set());
 
@@ -216,6 +221,50 @@ export default function App() {
     };
   }, [selected?.marketId]);
 
+  // Live book for the open ticket only — not a full 50-market rescan.
+  useEffect(() => {
+    if (!selected || !connected) return;
+    let cancelled = false;
+    async function tick() {
+      if (!selected) return;
+      const book = await fetchBook(selected.upSymbol);
+      if (cancelled || !book.mid) return;
+      setMarkets((prev) =>
+        prev.map((m) =>
+          m.marketId === selected.marketId
+            ? { ...m, impliedUp: book.mid, bestBid: book.bid, bestAsk: book.ask }
+            : m,
+        ),
+      );
+    }
+    void tick();
+    const id = setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [selected?.marketId, selected?.upSymbol, connected]);
+
+  useEffect(() => {
+    if (!selected || selected.asset === "OTHER") {
+      setSpotPrice(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchSpotPrice(selected.asset).then((p) => {
+      if (!cancelled) setSpotPrice(p);
+    });
+    const id = setInterval(() => {
+      void fetchSpotPrice(selected.asset).then((p) => {
+        if (!cancelled) setSpotPrice(p);
+      });
+    }, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [selected?.marketId, selected?.asset]);
+
   const filteredJournal = useMemo(() => {
     if (historyFilter === "all") return journal;
     if (historyFilter === "collected") return journal.filter((r) => r.kind === "redeem");
@@ -304,10 +353,16 @@ export default function App() {
   // settlement is common without this. Also what makes auto-claim notice a win.
   useEffect(() => {
     if (!connected) return;
-    const id = setInterval(() => void refresh(true), 15000);
+    const id = setInterval(() => void refresh(true), 45000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
+
+  useEffect(() => {
+    if (!signedIn || !walletAddress) return;
+    const id = setInterval(() => void discoverPositions(walletAddress), 15000);
+    return () => clearInterval(id);
+  }, [signedIn, walletAddress]);
 
   async function connectAndLoad(net: NetworkName, key?: string): Promise<boolean> {
     setBusy(true);
@@ -460,7 +515,7 @@ export default function App() {
         result: result.result,
         payout: result.result === "win" ? payout : undefined,
         hash: result.hash,
-        note,
+        note: result.result === "loss" && !result.hash ? "Settled as a loss — nothing to claim (skipped a 0-payout redeem)" : note,
       });
       if (walletAddress) void discoverPositions(walletAddress);
 
@@ -505,6 +560,7 @@ export default function App() {
   useEffect(() => {
     if (!autoClaim || !signedIn) return;
     for (const c of claimable) {
+      if (c.estimatedPayout <= 0) continue;
       const key = `${c.marketId}:${c.side}`;
       if (autoClaimingRef.current.has(key)) continue;
       autoClaimingRef.current.add(key);
@@ -741,6 +797,7 @@ export default function App() {
                   {selected.asset === "OTHER" ? "This market" : selected.asset} · Up or Down in {selected.timeframe}
                 </p>
                 <PriceChart points={chartPoints} />
+                <p className="ticket-edge">{formatEdge(selected.impliedUp, spotMovePct(spotPrice, selected.strike))}</p>
                 <label className="stake-label">
                   How much do you want to bet?
                   <div className="stake-input">
@@ -929,7 +986,7 @@ export default function App() {
                 onChange={(e) => setAutoClaim(e.target.checked)}
                 disabled={!signedIn}
               />
-              Auto-claim the instant a bet settles — no need to come back and tap Claim
+              Auto-claim winners the instant they settle. Losing sides are skipped (they pay 0). Voids redeem both sides.
             </label>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
               <input type="checkbox" checked={rollAfterRedeem} onChange={(e) => setRollAfterRedeem(e.target.checked)} />
@@ -941,6 +998,7 @@ export default function App() {
                 onClick={() => {
                   void (async () => {
                     for (const item of claimable) {
+                      if (item.estimatedPayout <= 0) continue;
                       await onRedeem(item.marketId, item.symbol, item.side, item.asset, item.estimatedPayout);
                     }
                   })();
@@ -978,10 +1036,10 @@ export default function App() {
             ))}
             <h3 className="muted">Ready to claim</h3>
             {claimable.length === 0 && (
-              <p className="muted">Nothing to claim yet. Settled bets show up here.</p>
+              <p className="muted">Nothing to claim yet. Keel also scans finalized windows on-chain, not just this browser's history.</p>
             )}
             {claimable.map((c) => (
-              <div key={c.marketId} className="market">
+              <div key={`${c.marketId}:${c.side}`} className="market">
                 <div className="market-top">
                   <strong className="market-name">
                     <span className="asset-icon">{ASSET_ICON[c.asset]}</span>

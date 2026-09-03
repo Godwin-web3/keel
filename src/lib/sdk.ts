@@ -79,6 +79,16 @@ type Exchange = {
     }>;
     getOutcomeBalance?: (p: { outcomeToken: `0x${string}`; account: `0x${string}`; id: bigint }) => Promise<bigint>;
     getPortfolio?: (account: string, opts?: { tradesLimit?: number }) => Promise<{ positions: PortfolioPositionShape[] }>;
+    getClaimable?: (account: string) => Promise<
+      Array<{
+        marketId: string;
+        pool?: string;
+        outcomeIdx: number;
+        amount: bigint | string | number;
+        estPayout: bigint | string | number;
+        status?: string;
+      }>
+    >;
     redeemOutcome?: (...args: any[]) => Promise<any>;
     getCandles?: (
       pool: string,
@@ -87,6 +97,14 @@ type Exchange = {
     ) => Promise<CandleShape[]>;
     getFills?: (pool: string, opts?: { limit?: number; offset?: number }) => Promise<FillShape[]>;
     listPastBinaryMarkets?: (opts?: { limit?: number }) => Promise<PastMarketShape[]>;
+    listBinaryMarkets?: (opts?: { status?: string; limit?: number; venueId?: string }) => Promise<any[]>;
+    watchMarkets?: (opts?: { discover?: boolean }) => Promise<{ stop: () => void }>;
+    watchMarket?: (pool: string) => Promise<{ stop: () => void }>;
+    watchPrice?: (asset: string) => Promise<{ stop: () => void }>;
+    getLivePrice?: (asset: string) => { price?: number; ema?: number } | null;
+    fetchPrice?: (asset: string) => Promise<{ price?: number; latestSpot?: string; ema?: number } | null>;
+    subscribeLive?: (listener: () => void) => (() => void) | void;
+    getLiveBinaryOrderBook?: (pool: string) => any;
   };
   trader?: {
     redeem?: (args: {
@@ -99,11 +117,14 @@ type Exchange = {
     redeemOutcome?: (...args: any[]) => Promise<any>;
     cancelOrder?: (...args: any[]) => Promise<any>;
   };
+  watchOrderBook?: (ref: string, depth?: number) => Promise<any>;
+  fetchPrice?: (asset: string) => Promise<{ price?: number; ema?: number } | null>;
 };
 
 let exchange: Exchange | null = null;
 let lastConfig: string = "";
 let accountAddress: `0x${string}` | null = null;
+let liveStop: (() => void) | null = null;
 
 export function maskKey(key: string): string {
   if (!key) return "";
@@ -149,6 +170,7 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
   exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
   lastConfig = fingerprint;
   await exchange.loadMarkets(true);
+  void startLiveFeeds();
 }
 
 // ---------------- injected browser wallet (MetaMask/Rabby/etc.) ----------------
@@ -238,6 +260,7 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
   lastConfig = `${network}:injected:${address.toLowerCase()}`;
   accountAddress = address;
   await exchange.loadMarkets(true);
+  void startLiveFeeds();
   return address;
 }
 
@@ -250,9 +273,78 @@ export function getAccountAddress(): `0x${string}` | null {
 }
 
 export function disconnectExchange(): void {
+  stopLiveFeeds();
   exchange = null;
   lastConfig = "";
   accountAddress = null;
+}
+
+/** Start SDK live watches (market discovery + BTC/ETH oracle). Best-effort. */
+export async function startLiveFeeds(): Promise<void> {
+  stopLiveFeeds();
+  if (!exchange) return;
+  const stops: Array<() => void> = [];
+  try {
+    if (typeof exchange.client.watchMarkets === "function") {
+      const h = await exchange.client.watchMarkets({ discover: true });
+      if (h?.stop) stops.push(() => h.stop());
+    }
+  } catch {
+    /* watches are optional — polling still works */
+  }
+  try {
+    if (typeof exchange.client.watchPrice === "function") {
+      for (const asset of ["BTC", "ETH"]) {
+        try {
+          const h = await exchange.client.watchPrice(asset);
+          if (h?.stop) stops.push(() => h.stop());
+        } catch {
+          /* price feed may be unset */
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  liveStop = () => {
+    for (const stop of stops) {
+      try {
+        stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    liveStop = null;
+  };
+}
+
+export function stopLiveFeeds(): void {
+  liveStop?.();
+}
+
+export async function fetchBook(symbol: string): Promise<{ bid: number | null; ask: number | null; mid: number | null }> {
+  return safeBook(symbol);
+}
+
+export async function fetchSpotPrice(asset: string): Promise<number | null> {
+  if (!exchange || asset === "OTHER") return null;
+  try {
+    if (typeof exchange.fetchPrice === "function") {
+      const p = await exchange.fetchPrice(asset);
+      const n = Number(p?.price ?? p?.ema);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    if (typeof exchange.client.fetchPrice === "function") {
+      const p = await exchange.client.fetchPrice(asset);
+      const n = Number(p?.price ?? p?.latestSpot ?? p?.ema);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    const live = exchange.client.getLivePrice?.(asset);
+    const n = Number(live?.price ?? live?.ema);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 function pickImplied(book: any): { bid: number | null; ask: number | null; mid: number | null } {
@@ -370,64 +462,98 @@ function resolveMarketMeta(
   return { symbol: symbol || declaredSymbol, asset, expirySec, timeframe };
 }
 
+function parseStrike(market: any): number | null {
+  const raw = market?.strike ?? market?.openingPrice ?? market?.refPrice ?? market?.info?.strike;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function poolOf(market: any): string {
+  const p = String(market?.poolAddress ?? market?.binaryPoolAddress ?? market?.pool ?? market?.info?.poolAddress ?? "");
+  return p.startsWith("0x") ? p : "";
+}
+
+function yesNoSymbols(declared: string, resolved: string): { upSymbol: string; downSymbol: string } {
+  const src = SYMBOL_RE.test(declared) ? declared : resolved || declared;
+  const base = src.replace(/#(YES|NO)$/i, "");
+  if (base.includes("/") || SYMBOL_RE.test(base)) {
+    return { upSymbol: `${base}#YES`, downSymbol: `${base}#NO` };
+  }
+  return { upSymbol: src || resolved, downSymbol: `${base}#NO` };
+}
+
+export function outcomeSymbol(market: WindowMarket, side: Side): string {
+  if (side === "down" && market.downSymbol) return market.downSymbol;
+  if (side === "up" && market.upSymbol) return market.upSymbol;
+  const raw = market.upSymbol || market.symbol;
+  const base = raw.replace(/#(YES|NO)$/i, "");
+  return `${base}#${side === "up" ? "YES" : "NO"}`;
+}
+
 export async function listWindows(): Promise<WindowMarket[]> {
   if (!exchange) throw new Error("Exchange is not connected.");
 
   const now = Date.now() / 1000;
-  const out: WindowMarket[] = [];
 
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
     const live = await exchange.client.listLiveBinaryMarkets({ limit: 50 });
-    for (const m of live) {
-      const marketId = String(m.marketId || m.id || "");
-      if (!marketId.startsWith("0x")) continue;
-      // m.status here is the indexer's BinaryMarketStatus STRING ("Trading",
-      // "Finalized", ...), not a numeric code — used only if the on-chain
-      // read below fails.
-      let status: MarketStatus = statusFromString(m.status);
-      let statusCode = 1;
-      let isResolved: boolean | undefined;
-      let isVoided: boolean | undefined;
-      let winningOutcome: number | null | undefined;
-      try {
-        const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
-        statusCode = Number(onchain.status);
-        status = statusFromCode(statusCode);
-        isResolved = onchain.isResolved;
-        isVoided = onchain.isVoided;
-        winningOutcome = onchain.winningOutcome ?? null;
-      } catch {
-        /* on-chain read failed; fall back to the indexer's own status string */
-      }
-      const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
-      const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
-      const secondsLeft = expirySec ? expirySec - now : 0;
-      const book = await safeBook(symbol || marketId);
-      out.push({
-        marketId,
-        symbol: symbol || marketId,
-        upSymbol: symbol || marketId,
-        asset,
-        timeframe,
-        expirySec,
-        secondsLeft,
-        status,
-        statusCode,
-        isResolved,
-        isVoided,
-        winningOutcome,
-        impliedUp: book.mid,
-        bestBid: book.bid,
-        bestAsk: book.ask,
-        openingPriceLabel: String(m.openingPrice ?? m.strike ?? m.refPrice ?? "window open"),
-        raw: m,
-      });
-    }
-    return out.sort((a, b) => a.secondsLeft - b.secondsLeft);
+    const mapped = await Promise.all(
+      live.map(async (m) => {
+        const marketId = String(m.marketId || m.id || "");
+        if (!marketId.startsWith("0x")) return null;
+        let status: MarketStatus = statusFromString(m.status);
+        let statusCode = 1;
+        let isResolved: boolean | undefined;
+        let isVoided: boolean | undefined;
+        let winningOutcome: number | null | undefined;
+        try {
+          const onchain = await exchange!.client.getMarketOnchain(marketId as `0x${string}`);
+          statusCode = Number(onchain.status);
+          status = statusFromCode(statusCode);
+          isResolved = onchain.isResolved;
+          isVoided = onchain.isVoided;
+          winningOutcome = onchain.winningOutcome ?? null;
+        } catch {
+          /* indexer status fallback */
+        }
+        const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
+        const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
+        const { upSymbol, downSymbol } = yesNoSymbols(declaredSymbol, symbol);
+        const secondsLeft = expirySec ? expirySec - now : 0;
+        const book = status === "trading" ? await safeBook(upSymbol || marketId) : { bid: null, ask: null, mid: null };
+        const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
+        const row: WindowMarket = {
+          marketId,
+          symbol: symbol || marketId,
+          upSymbol: upSymbol || marketId,
+          downSymbol,
+          asset,
+          timeframe,
+          expirySec,
+          tradingStartSec,
+          secondsLeft,
+          status,
+          statusCode,
+          isResolved,
+          isVoided,
+          winningOutcome,
+          impliedUp: book.mid,
+          bestBid: book.bid,
+          bestAsk: book.ask,
+          openingPriceLabel: String(m.openingPrice ?? m.strike ?? m.refPrice ?? "window open"),
+          strike: parseStrike(m),
+          poolAddress: poolOf(m),
+          raw: m,
+        };
+        return row;
+      }),
+    );
+    return mapped.filter((row): row is WindowMarket => row !== null).sort((a, b) => a.secondsLeft - b.secondsLeft);
   }
 
   const loaded = Object.values(await exchange.loadMarkets(true));
   const { isBinaryMarket } = await import("@somnia-chain/markets-sdk");
+  const out: WindowMarket[] = [];
 
   for (const m of loaded) {
     const info = m.info ?? m;
@@ -437,8 +563,8 @@ export async function listWindows(): Promise<WindowMarket[]> {
       }
     }
     const marketId = extractMarketId(m);
-    const upSymbol = extractUpSymbol(m);
-    if (!marketId || !upSymbol) continue;
+    const upRaw = extractUpSymbol(m);
+    if (!marketId || !upRaw) continue;
 
     let statusCode = 1;
     let status: MarketStatus = statusFromString(m.status ?? m.info?.status);
@@ -459,17 +585,21 @@ export async function listWindows(): Promise<WindowMarket[]> {
       if (status === "unknown") status = statusFromCode(statusCode);
     }
 
-    const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, upSymbol);
+    const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, upRaw);
+    const { upSymbol, downSymbol } = yesNoSymbols(upRaw, symbol);
     const secondsLeft = expirySec ? expirySec - now : 0;
-    const book = await safeBook(symbol);
+    const book = status === "trading" ? await safeBook(upSymbol) : { bid: null, ask: null, mid: null };
+    const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
 
     out.push({
       marketId,
       symbol,
-      upSymbol: symbol,
+      upSymbol,
+      downSymbol,
       asset,
       timeframe,
       expirySec,
+      tradingStartSec,
       secondsLeft,
       status,
       statusCode,
@@ -480,6 +610,8 @@ export async function listWindows(): Promise<WindowMarket[]> {
       bestBid: book.bid,
       bestAsk: book.ask,
       openingPriceLabel: "window open",
+      strike: parseStrike(m),
+      poolAddress: poolOf(m),
       raw: m,
     });
   }
@@ -519,16 +651,13 @@ export async function placeStake(args: {
   const price = Math.min(0.99, Math.max(0.01, entry));
   const contracts = args.stake / price;
 
-  const book = await safeBook(args.market.upSymbol);
-  const limit =
-    args.side === "up"
-      ? (book.ask ?? price) + 0.02
-      : 1 - ((book.bid ?? price) - 0.02);
+  // Always BUY the outcome token. Down is #NO, not a sell on the Up book —
+  // selling Up requires inventory and is the wrong fill path for a new stake.
+  const symbol = outcomeSymbol(args.market, args.side);
+  const book = await safeBook(symbol);
+  const limit = Math.min(0.99, Math.max(0.01, (book.ask ?? price) + 0.02));
 
-  const symbol = args.market.upSymbol;
-  const orderSide = args.side === "up" ? "buy" : "sell";
-
-  const order = await exchange.createOrder(symbol, "limit", orderSide, Number(contracts.toFixed(4)), Number(limit.toFixed(4)), {
+  const order = await exchange.createOrder(symbol, "limit", "buy", Number(contracts.toFixed(4)), Number(limit.toFixed(4)), {
     timeInForce: "IOC",
   });
 
@@ -552,12 +681,52 @@ function sideFromWinningOutcome(outcome: unknown): Side | null {
 export async function redeemMarket(
   marketId: string,
   side: Side,
-): Promise<{ hash?: string; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
+): Promise<{ hash?: string; hashes: string[]; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
   if (!exchange) throw new Error("Exchange is not connected.");
 
   const oc = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
 
-  let raw: any;
+  // Losing redeem succeeds on-chain and pays 0. Skip the gas.
+  if (oc.isResolved && !oc.isVoided) {
+    const winningSide = sideFromWinningOutcome(oc.winningOutcome);
+    if (winningSide && winningSide !== side) {
+      return { hashes: [], result: "loss", raw: null };
+    }
+  }
+
+  const sides: Side[] = oc.isVoided ? ["up", "down"] : [side];
+  const hashes: string[] = [];
+  let lastRaw: unknown = null;
+
+  for (const s of sides) {
+    const raw = await redeemOneSide(marketId, s, oc);
+    if (!raw) continue;
+    lastRaw = raw;
+    if (raw?.receipt?.status === "reverted") {
+      throw new Error("Redeem transaction reverted on-chain.");
+    }
+    const hash = raw?.receipt?.transactionHash || raw?.transactionHash;
+    if (hash) hashes.push(String(hash));
+  }
+
+  let result: "win" | "loss" | "void" | "pending" = "pending";
+  if (oc.isVoided) {
+    result = "void";
+  } else if (oc.isResolved) {
+    const winningSide = sideFromWinningOutcome(oc.winningOutcome);
+    result = winningSide === side ? "win" : "loss";
+  }
+
+  if (hashes.length === 0 && result !== "loss") {
+    throw new Error("No redeemable balance held for this market.");
+  }
+
+  return { hash: hashes[0], hashes, result, raw: lastRaw };
+}
+
+async function redeemOneSide(marketId: string, side: Side, oc: any): Promise<any> {
+  if (!exchange) return null;
+
   if (typeof exchange.trader?.redeem === "function" && typeof exchange.client.getOutcomeBalance === "function") {
     const { marketAddress, outcomeToken, yesId, noId } = oc;
     if (!marketAddress || !outcomeToken || yesId === undefined || noId === undefined) {
@@ -572,44 +741,25 @@ export async function redeemMarket(
     const outcomeIdx = side === "up" ? 0 : 1;
     const tokenId = BigInt(outcomeIdx === 0 ? yesId : noId);
     const amount = await exchange.client.getOutcomeBalance({ outcomeToken, account: accountAddress, id: tokenId });
-    if (amount === 0n) {
-      throw new Error("No redeemable balance held for this side on this market.");
-    }
+    if (amount === 0n) return null;
 
-    raw = await exchange.trader.redeem({
+    return exchange.trader.redeem({
       marketId: marketId as `0x${string}`,
       market: marketAddress,
       outcomeToken,
       outcomeIdx,
       amount,
     });
-  } else {
-    // Fall back to an older SDK surface that redeems by marketId alone.
-    const trader = exchange.trader ?? (exchange.client as any);
-    const fn = trader?.redeemOutcome ?? exchange.client.redeemOutcome;
-    if (typeof fn !== "function") {
-      throw new Error(
-        "This SDK build exposes neither trader.redeem(...) nor redeemOutcome(marketId). Check docs.dreamdex.io/developers/event-contracts/recipes and wire the method from your installed version.",
-      );
-    }
-    raw = await fn(marketId);
   }
 
-  if (raw?.receipt?.status === "reverted") {
-    throw new Error("Redeem transaction reverted on-chain.");
+  const trader = exchange.trader ?? (exchange.client as any);
+  const fn = trader?.redeemOutcome ?? exchange.client.redeemOutcome;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "This SDK build exposes neither trader.redeem(...) nor redeemOutcome(marketId). Check docs.dreamdex.io/developers/event-contracts/recipes and wire the method from your installed version.",
+    );
   }
-
-  const hash = raw?.receipt?.transactionHash || raw?.transactionHash;
-
-  let result: "win" | "loss" | "void" | "pending" = "pending";
-  if (oc.isVoided) {
-    result = "void";
-  } else if (oc.isResolved) {
-    const winningSide = sideFromWinningOutcome(oc.winningOutcome);
-    result = winningSide === side ? "win" : "loss";
-  }
-
-  return { hash, result, raw };
+  return fn(marketId);
 }
 
 export function derivePositions(
@@ -626,14 +776,16 @@ export function derivePositions(
   // whose market already has a matching redeem row has already been claimed
   // — without this, a claimed position would never leave the claimable list
   // and auto-claim would keep retrying it forever.
-  const redeemedMarketIds = new Set(journal.filter((r) => r.kind === "redeem").map((r) => r.marketId));
+  const redeemedKeys = new Set(
+    journal.filter((r) => r.kind === "redeem").map((r) => `${r.marketId}:${r.side ?? ""}`),
+  );
 
   for (const row of journal) {
     if (row.kind !== "trade" || row.result === "win" || row.result === "loss" || row.result === "void") continue;
-    if (redeemedMarketIds.has(row.marketId)) continue;
+    const side = row.side ?? "up";
+    if (redeemedKeys.has(`${row.marketId}:${side}`)) continue;
     const market = markets.find((m) => m.marketId === row.marketId);
     const status = market?.status ?? "unknown";
-    const side = row.side ?? "up";
     const stake = row.stake ?? 0;
     const entryProb = row.entryProb ?? 0.5;
     const contracts = entryProb > 0 ? stake / entryProb : 0;
@@ -662,16 +814,18 @@ export function derivePositions(
             : winningSide === side
               ? contracts
               : 0;
-      claimable.push({
-        marketId: row.marketId,
-        symbol: market?.symbol ?? row.marketId,
-        asset: market?.asset ?? "OTHER",
-        timeframe: market?.timeframe ?? "other",
-        side,
-        contracts,
-        estimatedPayout,
-        resolved: status === "resolved" || status === "finalized",
-      });
+      if (estimatedPayout > 0) {
+        claimable.push({
+          marketId: row.marketId,
+          symbol: market?.symbol ?? row.marketId,
+          asset: market?.asset ?? "OTHER",
+          timeframe: market?.timeframe ?? "other",
+          side,
+          contracts,
+          estimatedPayout,
+          resolved: status === "resolved" || status === "finalized",
+        });
+      }
     }
   }
 
@@ -741,17 +895,52 @@ export async function discoverOnchainPositions(account: `0x${string}`): Promise<
           : winningSide === side
             ? contracts
             : 0;
-      claimable.push({
-        marketId: p.market.id,
-        symbol: p.market.id,
-        asset,
-        timeframe,
-        side,
-        contracts,
-        estimatedPayout,
-        resolved: status === "resolved" || status === "finalized",
-        fromChain: true,
-      });
+      if (estimatedPayout > 0) {
+        claimable.push({
+          marketId: p.market.id,
+          symbol: p.market.id,
+          asset,
+          timeframe,
+          side,
+          contracts,
+          estimatedPayout,
+          resolved: status === "resolved" || status === "finalized",
+          fromChain: true,
+        });
+      }
+    }
+  }
+
+  if (typeof exchange.client.getClaimable === "function") {
+    try {
+      const extra = await exchange.client.getClaimable(account);
+      const seen = new Set(claimable.map((c) => `${c.marketId}:${c.side}`));
+      for (const row of extra ?? []) {
+        const side: Side = Number(row.outcomeIdx) === 1 ? "down" : "up";
+        const key = `${row.marketId}:${side}`;
+        if (seen.has(key)) continue;
+        const decimals = 6;
+        const payoutRaw = typeof row.estPayout === "bigint" ? Number(row.estPayout) : Number(row.estPayout);
+        const amountRaw = typeof row.amount === "bigint" ? Number(row.amount) : Number(row.amount);
+        const estimatedPayout = Number.isFinite(payoutRaw) ? payoutRaw / 10 ** decimals : 0;
+        const contracts = Number.isFinite(amountRaw) ? amountRaw / 10 ** decimals : 0;
+        if (estimatedPayout <= 0) continue;
+        const status = statusFromString(row.status);
+        claimable.push({
+          marketId: row.marketId,
+          symbol: row.marketId,
+          asset: "OTHER",
+          timeframe: "other",
+          side,
+          contracts,
+          estimatedPayout,
+          resolved: status === "resolved" || status === "finalized" || status === "voided",
+          fromChain: true,
+        });
+        seen.add(key);
+      }
+    } catch {
+      /* getClaimable is additive */
     }
   }
 
@@ -798,8 +987,14 @@ export async function getMarketProbabilityHistory(
   const pool = String(raw?.poolAddress ?? raw?.pool ?? "");
   if (!pool || !pool.startsWith("0x")) return [];
   const quoteDecimals = Number(raw?.quoteDecimals ?? 6);
+  const from = market.tradingStartSec || undefined;
+  const to = market.expirySec || undefined;
   try {
-    const candles = await exchange.client.getCandles(pool, opts.intervalSeconds ?? 60, { limit: opts.limit ?? 60 });
+    const candles = await exchange.client.getCandles(pool, opts.intervalSeconds ?? 60, {
+      limit: opts.limit ?? 60,
+      from,
+      to,
+    });
     return candles
       .map((c) => ({
         t: Number(c.bucketStart) * 1000,

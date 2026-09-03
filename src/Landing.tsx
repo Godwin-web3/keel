@@ -17,8 +17,8 @@ const BENEFITS = [
     body: "Every bet shows exactly what you win and exactly what you can lose, before you tap anything. No surprises.",
   },
   {
-    title: "Browse for free",
-    body: "Watch live odds and countdowns without connecting a thing. Connect only when you're ready to bet.",
+    title: "Winnings don't arrive on their own",
+    body: "Event Contracts pay only when you redeem. Keel watches settled windows and pulls the USDso back — even from bets you placed in another tab.",
   },
 ];
 
