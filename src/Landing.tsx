@@ -9,23 +9,23 @@ const DEMO_CHART: ProbabilityPoint[] = [0.5, 0.53, 0.58, 0.55, 0.6, 0.64, 0.61, 
 
 const BENEFITS = [
   {
-    title: "Windows that settle fast — or don't",
-    body: "BTC and ETH windows run from 5 minutes to a full hour. Same interface either way: pick the pace you want.",
+    title: "Parlay two windows the venue cannot list",
+    body: "BTC Up and ETH Down in the same minute. Combined payout. DreamDEX sells atoms. Keel sells the molecule.",
   },
   {
-    title: "Know your numbers upfront",
-    body: "Every bet shows exactly what you win and exactly what you can lose, before you tap anything. No surprises.",
+    title: "A run with rails, not a checkbox",
+    body: "Start with $10. Cash out at $18. Stop at $5. Max five windows. Keel claims, restakes the successor, and halts itself.",
   },
   {
-    title: "Winnings don't arrive on their own",
-    body: "Event Contracts pay only when you redeem. Keel watches settled windows and pulls the USDso back — even from bets you placed in another tab.",
+    title: "Settlement that pays you",
+    body: "Event Contracts never send winnings. Keel watches MarketFinalized on your open windows and pulls the USDso — no Claim tap.",
   },
 ];
 
 const STEPS = [
-  { title: "Pick a side", body: "Tap Up or Down on any live BTC or ETH window." },
-  { title: "Watch it move", body: "The odds shift live as the window counts down to close." },
-  { title: "Collect your winnings", body: "Auto-claim it, or come back and tap once. Either way, it's yours." },
+  { title: "Call one side — or parlay both assets", body: "One window, or BTC × ETH in the same breath." },
+  { title: "Start a run", body: "Set cash-out, stop-loss, max rounds. Keel rides successors until a rail hits." },
+  { title: "Get paid", body: "Winners redeem as they settle. Losers are skipped. Voids return both sides." },
 ];
 
 export default function Landing({ onLaunch }: { onLaunch: () => void }) {
@@ -50,11 +50,11 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
         <div className="hero-copy">
           <span className="kicker">Live on Somnia</span>
           <h1>
-            Call it. <span className="accent">Up or Down.</span>
+            Not a market. <span className="accent">A session.</span>
           </h1>
           <p>
-            Bitcoin and Ethereum price windows that settle in minutes, not months. Pick a side, watch it move,
-            collect if you're right.
+            Parlay BTC × ETH in one ticket. Ride a run that stops itself. Get paid when the window settles — the venue
+            will not send it.
           </p>
           <div className="hero-actions">
             <button onClick={onLaunch}>Launch app — free to browse</button>
@@ -63,8 +63,8 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
         </div>
 
         <div className="card demo-ticket">
-          <h2>Place your bet</h2>
-          <p className="plain">BTC · Up or Down in 5m</p>
+          <h2>Parlay</h2>
+          <p className="plain">BTC Up × ETH Down · same window</p>
           <PriceChart points={DEMO_CHART} />
           <div className="market-top" style={{ margin: "14px 0" }}>
             <span className="round-slot" style={{ color: "var(--up)" }}>
@@ -74,12 +74,12 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
           </div>
           <div className="ticket-math">
             <div>
-              <span>You win if Up</span>
-              15.38
+              <span>Both hit</span>
+              34.20
             </div>
             <div>
-              <span>You win if Down</span>
-              28.57
+              <span>Combined</span>
+              29%
             </div>
             <div>
               <span>Most you can lose</span>
@@ -88,10 +88,10 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
           </div>
           <div className="actions">
             <button className="up" tabIndex={-1}>
-              Bet Up
+              Up × Down
             </button>
             <button className="down" tabIndex={-1}>
-              Bet Down
+              Down × Up
             </button>
           </div>
         </div>

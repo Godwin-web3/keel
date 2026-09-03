@@ -38,6 +38,14 @@ export type TicketQuote = {
   maxLoss: number;
 };
 
+export type ParlayQuote = {
+  stake: number;
+  implied: number;
+  redeemIfWin: number;
+  maxLoss: number;
+  legs: Array<TicketQuote & { asset: WindowMarket["asset"]; marketId: string }>;
+};
+
 export type OpenPosition = {
   marketId: string;
   symbol: string;
@@ -52,6 +60,8 @@ export type OpenPosition = {
   status: MarketStatus;
   /** True when this row came from an on-chain balance scan, not the local journal. */
   fromChain?: boolean;
+  parlayId?: string;
+  runId?: string;
 };
 
 export type Claimable = {
@@ -70,7 +80,7 @@ export type Claimable = {
 export type JournalRow = {
   id: string;
   at: string;
-  kind: "trade" | "redeem" | "roll" | "note";
+  kind: "trade" | "redeem" | "roll" | "note" | "parlay" | "run";
   marketId: string;
   symbol: string;
   asset?: WindowMarket["asset"];
@@ -82,4 +92,39 @@ export type JournalRow = {
   payout?: number;
   hash?: string;
   note?: string;
+  parlayId?: string;
+  runId?: string;
+};
+
+export type RunHop = {
+  marketId: string;
+  symbol: string;
+  asset: WindowMarket["asset"];
+  timeframe: string;
+  side: Side;
+  stake: number;
+  at: string;
+  result?: "win" | "loss" | "void" | "pending";
+  payout?: number;
+  hash?: string;
+};
+
+export type RunStatus = "running" | "cashed" | "stopped" | "busted" | "maxed";
+
+export type RunState = {
+  id: string;
+  status: RunStatus;
+  bankrollStart: number;
+  bankrollNow: number;
+  peak: number;
+  cashOutAt: number;
+  stopAt: number;
+  maxRounds: number;
+  sameSide: boolean;
+  asset: "BTC" | "ETH";
+  timeframe: string;
+  hops: RunHop[];
+  startedAt: string;
+  endedAt?: string;
+  stopReason?: string;
 };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Claimable, JournalRow, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./lib/types";
+import type { Claimable, JournalRow, MarketStatus, NetworkName, OpenPosition, RunState, Side, WindowMarket } from "./lib/types";
 import {
   ASSET_ICON,
   detectAsset,
@@ -14,6 +14,18 @@ import {
   STATUS_LABEL,
 } from "./lib/format";
 import { appendJournal, loadJournal } from "./lib/journal";
+import {
+  applyHopResult,
+  appendPendingHop,
+  endRun,
+  findLiveWindow,
+  findParlayPartner,
+  findSuccessor,
+  loadRun,
+  newRun,
+  quoteParlay,
+  saveRun,
+} from "./lib/instruments";
 import {
   connectExchange,
   connectInjectedWallet,
@@ -30,18 +42,24 @@ import {
   listWindows,
   maskKey,
   mergePositions,
+  onLiveUpdate,
+  peekStatuses,
+  placeParlay,
   placeStake,
   redeemMarket,
+  watchPools,
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
 import Landing from "./Landing";
 import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
+import RunCard from "./RunCard";
 import { ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
 
-type Tab = "markets" | "desk" | "leaderboard";
+type Tab = "markets" | "run" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
+type PendingBet = { kind: "single"; side: Side } | { kind: "parlay"; a: Side; b: Side } | null;
 
 const DEFAULT_STAKE = 10;
 const APP_HASH = "#/app";
@@ -50,6 +68,8 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   redeem: "Claimed",
   roll: "Rolled",
   note: "Note",
+  parlay: "Parlay",
+  run: "Run",
 };
 
 // Windows this long or shorter render a countdown ring — a 1h+ window ticking
@@ -110,10 +130,18 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [journal, setJournal] = useState<JournalRow[]>([]);
-  const [rollAfterRedeem, setRollAfterRedeem] = useState(true);
-  const [autoClaim, setAutoClaim] = useState(false);
+  const [autoClaim, setAutoClaim] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [pendingBet, setPendingBet] = useState<Side | null>(null);
+  const [pendingBet, setPendingBet] = useState<PendingBet>(null);
+  const [parlayOn, setParlayOn] = useState(false);
+  const [parlaySideB, setParlaySideB] = useState<Side>("down");
+  const [run, setRun] = useState<RunState | null>(null);
+  const [runStake, setRunStake] = useState(10);
+  const [runCashOut, setRunCashOut] = useState(18);
+  const [runStop, setRunStop] = useState(5);
+  const [runMax, setRunMax] = useState(5);
+  const [runSameSide, setRunSameSide] = useState(true);
+  const [runAsset, setRunAsset] = useState<"BTC" | "ETH">("BTC");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [theme, setTheme] = useState<Theme | null>(() => getStoredTheme());
   const [moreOpen, setMoreOpen] = useState(false);
@@ -123,10 +151,18 @@ export default function App() {
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const refreshingRef = useRef(false);
   const autoClaimingRef = useRef<Set<string>>(new Set());
+  const runRef = useRef<RunState | null>(null);
+  runRef.current = run;
+  const restakingRef = useRef(false);
 
   useEffect(() => {
     setJournal(loadJournal());
+    setRun(loadRun());
   }, []);
+
+  useEffect(() => {
+    saveRun(run);
+  }, [run]);
 
   useEffect(() => {
     setInjectedAvailable(hasInjectedWallet());
@@ -186,6 +222,10 @@ export default function App() {
   }
 
   const selected = markets.find((m) => m.marketId === selectedId) ?? null;
+  const parlayPartner = useMemo(
+    () => (selected ? findParlayPartner(selected, markets) : null),
+    [selected, markets],
+  );
 
   // Group windows by asset+cadence and order soonest-first, so each group can
   // render as a Live/Next/Later round carousel instead of one flat list.
@@ -364,6 +404,64 @@ export default function App() {
     return () => clearInterval(id);
   }, [signedIn, walletAddress]);
 
+  useEffect(() => {
+    if (!signedIn) return;
+    return onLiveUpdate(() => {
+      if (walletAddress) void discoverPositions(walletAddress);
+    });
+  }, [signedIn, walletAddress]);
+
+  useEffect(() => {
+    const pools = [
+      ...new Set(
+        open
+          .map((p) => markets.find((m) => m.marketId === p.marketId)?.poolAddress)
+          .filter((p): p is string => Boolean(p)),
+      ),
+    ];
+    if (pools.length === 0) return;
+    let stop: (() => void) | undefined;
+    void watchPools(pools).then((s) => {
+      stop = s;
+    });
+    return () => stop?.();
+  }, [open, markets]);
+
+  useEffect(() => {
+    if (!signedIn || open.length === 0) return;
+    let cancelled = false;
+    async function tick() {
+      const ids = [...new Set(open.map((p) => p.marketId))];
+      const map = await peekStatuses(ids);
+      if (cancelled || map.size === 0) return;
+      setMarkets((prev) =>
+        prev.map((m) => {
+          const hit = map.get(m.marketId);
+          if (!hit) return m;
+          const status: MarketStatus = hit.isVoided
+            ? "voided"
+            : hit.isResolved
+              ? "resolved"
+              : hit.status === 1
+                ? "trading"
+                : hit.status === 2
+                  ? "locked"
+                  : hit.status === 3
+                    ? "settling"
+                    : m.status;
+          return { ...m, status, isResolved: hit.isResolved, isVoided: hit.isVoided, statusCode: hit.status };
+        }),
+      );
+      if (walletAddress) void discoverPositions(walletAddress);
+    }
+    void tick();
+    const id = setInterval(() => void tick(), 6000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [signedIn, open, walletAddress]);
+
   async function connectAndLoad(net: NetworkName, key?: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
@@ -457,33 +555,188 @@ export default function App() {
     void connectAndLoad(network);
   }
 
-  async function onTrade(side: Side) {
-    if (!selected) return;
-    const q = quoteTicket(side, stake, selected.impliedUp);
+  async function onTrade(side: Side, market = selected, amount = stake, runId?: string) {
+    if (!market) return;
+    const q = quoteTicket(side, amount, market.impliedUp);
     setBusy(true);
     setMessage(null);
     try {
-      const result = await placeStake({ market: selected, side, stake });
+      const result = await placeStake({ market, side, stake: amount });
       const rows = appendJournal({
         kind: "trade",
-        marketId: selected.marketId,
-        symbol: selected.symbol,
-        asset: selected.asset,
+        marketId: market.marketId,
+        symbol: market.symbol,
+        asset: market.asset,
         side,
-        stake,
+        stake: amount,
         entryProb: q.entryProb,
         result: "pending",
         hash: result.hash,
-        note: plainLanguage(selected, stake, side),
+        runId,
+        note: plainLanguage(market, amount, side),
       });
       setJournal(rows);
-      setTab("desk");
+      if (!runId) setTab("desk");
       setMessage({ kind: "ok", text: `Bet placed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
+      return { hash: result.hash, quote: q };
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onParlay(aSide: Side, bSide: Side) {
+    if (!selected || !parlayPartner) return;
+    const q = quoteParlay(selected, aSide, parlayPartner, bSide, stake);
+    setBusy(true);
+    setMessage(null);
+    const parlayId = crypto.randomUUID();
+    try {
+      const placed = await placeParlay({
+        legs: [
+          { market: selected, side: aSide, stake: q.legs[0].stake },
+          { market: parlayPartner, side: bSide, stake: q.legs[1].stake },
+        ],
+      });
+      appendJournal({
+        kind: "parlay",
+        marketId: selected.marketId,
+        symbol: `${selected.asset}×${parlayPartner.asset}`,
+        asset: selected.asset,
+        stake,
+        parlayId,
+        note: `${selected.asset} ${aSide === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${bSide === "up" ? "Up" : "Down"} · both must hit · ~${q.redeemIfWin.toFixed(2)} back`,
+      });
+      for (const [i, leg] of placed.legs.entries()) {
+        const m = i === 0 ? selected : parlayPartner;
+        const side = i === 0 ? aSide : bSide;
+        appendJournal({
+          kind: "trade",
+          marketId: m.marketId,
+          symbol: m.symbol,
+          asset: m.asset,
+          side,
+          stake: q.legs[i].stake,
+          entryProb: q.legs[i].entryProb,
+          result: leg.error ? "pending" : "pending",
+          hash: leg.hash,
+          parlayId,
+          note: leg.error ?? plainLanguage(m, q.legs[i].stake, side),
+        });
+      }
+      setJournal(loadJournal());
+      setTab("desk");
+      const failed = placed.legs.filter((l) => l.error);
+      setMessage({
+        kind: failed.length === placed.legs.length ? "error" : "ok",
+        text:
+          failed.length === 0
+            ? `Parlay filled · ${selected.asset} × ${parlayPartner.asset}. Both must hit.`
+            : `Parlay partial: ${failed.map((f) => f.error).join(" · ")}`,
+      });
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
+  }
+
+  async function restakeRun(current: RunState, fromMarket: WindowMarket, lastSide: Side, nextStake: number) {
+    if (restakingRef.current) return;
+    restakingRef.current = true;
+    try {
+      const next = findSuccessor(fromMarket, markets) ?? findLiveWindow(markets, current.asset, current.timeframe);
+      if (!next) {
+        const stopped = endRun(current, "stopped", nextStake, "No successor window to ride.");
+        setRun(stopped);
+        setMessage({ kind: "ok", text: "Run paused — no live successor window." });
+        return;
+      }
+      const side: Side = current.sameSide ? lastSide : (next.impliedUp ?? 0.5) >= 0.5 ? "up" : "down";
+      const placed = await onTrade(side, next, nextStake, current.id);
+      if (!placed) return;
+      const hopped = appendPendingHop(current, {
+        marketId: next.marketId,
+        symbol: next.symbol,
+        asset: next.asset,
+        timeframe: next.timeframe,
+        side,
+        stake: nextStake,
+        at: new Date().toISOString(),
+        result: "pending",
+        hash: placed.hash,
+      });
+      setRun(hopped);
+      appendJournal({
+        kind: "roll",
+        marketId: next.marketId,
+        symbol: next.symbol,
+        asset: next.asset,
+        side,
+        stake: nextStake,
+        runId: current.id,
+        note: `Run hop ${hopped.hops.length}/${hopped.maxRounds} · ${next.asset} ${next.timeframe}`,
+      });
+      setJournal(loadJournal());
+      setMessage({ kind: "ok", text: `Run riding ${next.asset} ${next.timeframe} with ${nextStake.toFixed(2)}.` });
+    } finally {
+      restakingRef.current = false;
+    }
+  }
+
+  async function onStartRun() {
+    const live = findLiveWindow(markets, runAsset);
+    if (!live) {
+      setMessage({ kind: "error", text: `No live ${runAsset} window to start a run.` });
+      return;
+    }
+    const created = newRun({
+      stake: runStake,
+      cashOutAt: runCashOut,
+      stopAt: runStop,
+      maxRounds: runMax,
+      sameSide: runSameSide,
+      asset: runAsset,
+      timeframe: live.timeframe,
+    });
+    const side: Side = (live.impliedUp ?? 0.5) >= 0.5 ? "up" : "down";
+    const placed = await onTrade(side, live, runStake, created.id);
+    if (!placed) return;
+    const started = appendPendingHop(created, {
+      marketId: live.marketId,
+      symbol: live.symbol,
+      asset: live.asset,
+      timeframe: live.timeframe,
+      side,
+      stake: runStake,
+      at: new Date().toISOString(),
+      result: "pending",
+      hash: placed.hash,
+    });
+    setRun(started);
+    setAutoClaim(true);
+    setTab("run");
+    appendJournal({
+      kind: "run",
+      marketId: live.marketId,
+      symbol: live.symbol,
+      asset: live.asset,
+      side,
+      stake: runStake,
+      runId: started.id,
+      note: `Run started · cash out ${runCashOut} · stop ${runStop} · max ${runMax} rounds`,
+    });
+    setJournal(loadJournal());
+  }
+
+  function onStopRun() {
+    const current = runRef.current;
+    if (!current || current.status !== "running") return;
+    const stopped = endRun(current, "stopped", current.bankrollNow, "Stopped by you.");
+    setRun(stopped);
+    setMessage({ kind: "ok", text: "Run stopped. Claim anything still sitting on-chain from Desk." });
   }
 
   async function onRedeem(
@@ -519,28 +772,21 @@ export default function App() {
       });
       if (walletAddress) void discoverPositions(walletAddress);
 
-      if (rollAfterRedeem) {
-        const next = markets.find((m) => m.status === "trading" && m.marketId !== marketId);
-        if (next) {
-          appendJournal({
-            kind: "roll",
-            marketId: next.marketId,
-            symbol: next.symbol,
-            asset: next.asset,
-            note: `Lined up ${next.asset} ${next.timeframe}`,
-          });
-          setSelectedId(next.marketId);
-          if (!auto) setTab("markets");
-          setJournal(loadJournal());
-          setMessage({
-            kind: "ok",
-            text: auto
-              ? `Auto-claimed. Next window lined up: ${next.asset} ${next.timeframe}.`
-              : `Claimed. Picked your next window: ${next.asset} ${next.timeframe} — place it on Markets.`,
-          });
+      const currentRun = runRef.current;
+      const hop = currentRun?.hops.find((h) => h.marketId === marketId && (h.result === "pending" || !h.result));
+      if (currentRun && currentRun.status === "running" && hop && result.result !== "pending") {
+        const updated = applyHopResult(currentRun, marketId, result.result, result.result === "win" ? payout : result.result === "void" ? hop.stake : 0, result.hash);
+        setRun(updated);
+        setJournal(loadJournal());
+        if (updated.status === "running" && updated.bankrollNow > 0) {
+          const from = markets.find((m) => m.marketId === marketId);
+          if (from) void restakeRun(updated, from, hop.side, updated.bankrollNow);
           setBusy(false);
           return;
         }
+        setMessage({ kind: "ok", text: updated.stopReason ?? `Run ${updated.status}.` });
+        setBusy(false);
+        return;
       }
 
       setJournal(loadJournal());
@@ -785,7 +1031,7 @@ export default function App() {
         <div className="confirm-backdrop" onClick={closeBetSheet}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
-              <h2>{pendingBet ? "Confirm your bet" : "Place your bet"}</h2>
+              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm parlay" : "Confirm your bet") : "Place your bet"}</h2>
               <button className="ghost" onClick={closeBetSheet}>
                 Close
               </button>
@@ -798,6 +1044,27 @@ export default function App() {
                 </p>
                 <PriceChart points={chartPoints} />
                 <p className="ticket-edge">{formatEdge(selected.impliedUp, spotMovePct(spotPrice, selected.strike))}</p>
+                {parlayPartner && (
+                  <label className="parlay-toggle">
+                    <input
+                      type="checkbox"
+                      checked={parlayOn}
+                      onChange={(e) => setParlayOn(e.target.checked)}
+                    />
+                    Parlay with {parlayPartner.asset} {parlayPartner.timeframe} — both must hit. Venue does not list this.
+                  </label>
+                )}
+                {parlayOn && parlayPartner && (
+                  <div className="parlay-sides">
+                    <span className="muted">{parlayPartner.asset} side</span>
+                    <button type="button" className={parlaySideB === "up" ? "up" : "ghost"} onClick={() => setParlaySideB("up")}>
+                      Up
+                    </button>
+                    <button type="button" className={parlaySideB === "down" ? "down" : "ghost"} onClick={() => setParlaySideB("down")}>
+                      Down
+                    </button>
+                  </div>
+                )}
                 <label className="stake-label">
                   How much do you want to bet?
                   <div className="stake-input">
@@ -812,33 +1079,60 @@ export default function App() {
                   </div>
                 </label>
                 <div className="ticket-math">
-                  <div>
-                    <span>You win if Up</span>
-                    {formatUsd(quoteTicket("up", stake, selected.impliedUp).redeemIfWin)}
-                  </div>
-                  <div>
-                    <span>You win if Down</span>
-                    {formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
-                  </div>
-                  <div>
-                    <span>Most you can lose</span>
-                    {formatUsd(stake)}
-                  </div>
+                  {parlayOn && parlayPartner ? (
+                    <>
+                      <div>
+                        <span>Both hit</span>
+                        {formatUsd(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).redeemIfWin)}
+                      </div>
+                      <div>
+                        <span>Combined odds</span>
+                        {Math.round(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).implied * 100)}%
+                      </div>
+                      <div>
+                        <span>Most you can lose</span>
+                        {formatUsd(stake)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <span>You win if Up</span>
+                        {formatUsd(quoteTicket("up", stake, selected.impliedUp).redeemIfWin)}
+                      </div>
+                      <div>
+                        <span>You win if Down</span>
+                        {formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
+                      </div>
+                      <div>
+                        <span>Most you can lose</span>
+                        {formatUsd(stake)}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="actions">
                   <button
                     className="up"
                     disabled={busy || !signedIn || selected.status !== "trading"}
-                    onClick={() => setPendingBet("up")}
+                    onClick={() =>
+                      parlayOn && parlayPartner
+                        ? setPendingBet({ kind: "parlay", a: "up", b: parlaySideB })
+                        : setPendingBet({ kind: "single", side: "up" })
+                    }
                   >
-                    Bet Up
+                    {parlayOn ? `Up × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}` : "Bet Up"}
                   </button>
                   <button
                     className="down"
                     disabled={busy || !signedIn || selected.status !== "trading"}
-                    onClick={() => setPendingBet("down")}
+                    onClick={() =>
+                      parlayOn && parlayPartner
+                        ? setPendingBet({ kind: "parlay", a: "down", b: parlaySideB })
+                        : setPendingBet({ kind: "single", side: "down" })
+                    }
                   >
-                    Bet Down
+                    {parlayOn ? `Down × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}` : "Bet Down"}
                   </button>
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
@@ -846,16 +1140,18 @@ export default function App() {
                     ? "This window isn't open for new bets right now."
                     : !signedIn
                       ? "Connect a wallet above to place a bet."
-                      : "You can only lose what you bet — never more."}
+                      : parlayOn
+                        ? "Stake splits across both windows. You only get paid if both sides hit."
+                        : "You can only lose what you bet — never more."}
                 </p>
               </>
             )}
 
-            {pendingBet && (
+            {pendingBet && pendingBet.kind === "single" && (
               <>
                 <p className="muted" style={{ marginBottom: 14 }}>
                   {selected.asset} {selected.timeframe} ·{" "}
-                  <span className={`confirm-side ${pendingBet}`}>{pendingBet === "up" ? "Up" : "Down"}</span>
+                  <span className={`confirm-side ${pendingBet.side}`}>{pendingBet.side === "up" ? "Up" : "Down"}</span>
                 </p>
                 <div className="ticket-math">
                   <div>
@@ -864,7 +1160,7 @@ export default function App() {
                   </div>
                   <div>
                     <span>You get back if right</span>
-                    {formatUsd(quoteTicket(pendingBet, stake, selected.impliedUp).redeemIfWin)}
+                    {formatUsd(quoteTicket(pendingBet.side, stake, selected.impliedUp).redeemIfWin)}
                   </div>
                   <div>
                     <span>Most you can lose</span>
@@ -873,15 +1169,57 @@ export default function App() {
                 </div>
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
-                    className={pendingBet}
+                    className={pendingBet.side}
                     disabled={busy}
                     onClick={() => {
-                      const side = pendingBet;
+                      const side = pendingBet.side;
                       closeBetSheet();
                       void onTrade(side);
                     }}
                   >
-                    Confirm {pendingBet === "up" ? "Up" : "Down"}
+                    Confirm {pendingBet.side === "up" ? "Up" : "Down"}
+                  </button>
+                  <button className="ghost" onClick={() => setPendingBet(null)}>
+                    Back
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pendingBet && pendingBet.kind === "parlay" && parlayPartner && (
+              <>
+                <p className="muted" style={{ marginBottom: 14 }}>
+                  {selected.asset}{" "}
+                  <span className={`confirm-side ${pendingBet.a}`}>{pendingBet.a === "up" ? "Up" : "Down"}</span>
+                  {" × "}
+                  {parlayPartner.asset}{" "}
+                  <span className={`confirm-side ${pendingBet.b}`}>{pendingBet.b === "up" ? "Up" : "Down"}</span>
+                </p>
+                <div className="ticket-math">
+                  <div>
+                    <span>Total stake</span>
+                    {formatUsd(stake)}
+                  </div>
+                  <div>
+                    <span>Both hit</span>
+                    {formatUsd(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).redeemIfWin)}
+                  </div>
+                  <div>
+                    <span>Combined</span>
+                    {Math.round(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).implied * 100)}%
+                  </div>
+                </div>
+                <div className="actions" style={{ marginTop: 16 }}>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      const a = pendingBet.a;
+                      const b = pendingBet.b;
+                      closeBetSheet();
+                      void onParlay(a, b);
+                    }}
+                  >
+                    Confirm parlay
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
@@ -899,10 +1237,38 @@ export default function App() {
         <button className={tab === "markets" ? "active" : ""} onClick={() => setTab("markets")}>
           Markets
         </button>
+        <button className={tab === "run" ? "active" : ""} onClick={() => setTab("run")}>
+          Run{run?.status === "running" ? " · live" : ""}
+        </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
           My bets{claimable.length > 0 ? ` · ${claimable.length} to claim` : ""}
         </button>
       </div>
+
+      {tab === "run" && (
+        <div className="grid single tab-enter">
+          <RunCard
+            markets={markets}
+            signedIn={signedIn}
+            busy={busy}
+            run={run}
+            stake={runStake}
+            onStake={setRunStake}
+            cashOutAt={runCashOut}
+            onCashOutAt={setRunCashOut}
+            stopAt={runStop}
+            onStopAt={setRunStop}
+            maxRounds={runMax}
+            onMaxRounds={setRunMax}
+            sameSide={runSameSide}
+            onSameSide={setRunSameSide}
+            asset={runAsset}
+            onAsset={setRunAsset}
+            onStart={() => void onStartRun()}
+            onStop={onStopRun}
+          />
+        </div>
+      )}
 
       {tab === "markets" && (
         <section className="card markets-full">
@@ -986,11 +1352,7 @@ export default function App() {
                 onChange={(e) => setAutoClaim(e.target.checked)}
                 disabled={!signedIn}
               />
-              Auto-claim winners the instant they settle. Losing sides are skipped (they pay 0). Voids redeem both sides.
-            </label>
-            <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-              <input type="checkbox" checked={rollAfterRedeem} onChange={(e) => setRollAfterRedeem(e.target.checked)} />
-              After I claim, line up the next window automatically
+              Reactive claim — Keel watches settlement on your open windows and pulls winners. Losing sides are skipped. Voids redeem both sides.
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button

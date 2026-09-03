@@ -564,6 +564,113 @@ button:disabled {
   border-color: var(--accent);
 }
 
+.parlay-toggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 0 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.parlay-sides {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.parlay-sides button {
+  min-width: 64px;
+}
+
+.run-card h2 {
+  margin-bottom: 6px;
+}
+
+.run-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.run-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.run-grid input {
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
+
+.run-status {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--bg-1);
+}
+
+.run-status.running {
+  border-color: var(--accent);
+}
+
+.run-status.cashed {
+  border-color: var(--up);
+}
+
+.run-status.busted,
+.run-status.stopped {
+  border-color: var(--down);
+}
+
+.run-status-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.run-hops {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+}
+
+.run-hops li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.run-hops .win,
+.run-hops .cashed {
+  color: var(--up);
+}
+
+.run-hops .loss,
+.run-hops .busted {
+  color: var(--down);
+}
+
+@media (max-width: 640px) {
+  .run-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;

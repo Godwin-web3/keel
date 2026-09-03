@@ -100,6 +100,7 @@ type Exchange = {
     listBinaryMarkets?: (opts?: { status?: string; limit?: number; venueId?: string }) => Promise<any[]>;
     watchMarkets?: (opts?: { discover?: boolean }) => Promise<{ stop: () => void }>;
     watchMarket?: (pool: string) => Promise<{ stop: () => void }>;
+    watchUser?: (account: string) => Promise<{ stop: () => void }>;
     watchPrice?: (asset: string) => Promise<{ stop: () => void }>;
     getLivePrice?: (asset: string) => { price?: number; ema?: number } | null;
     fetchPrice?: (asset: string) => Promise<{ price?: number; latestSpot?: string; ema?: number } | null>;
@@ -125,6 +126,22 @@ let exchange: Exchange | null = null;
 let lastConfig: string = "";
 let accountAddress: `0x${string}` | null = null;
 let liveStop: (() => void) | null = null;
+const liveListeners = new Set<() => void>();
+
+export function onLiveUpdate(fn: () => void): () => void {
+  liveListeners.add(fn);
+  return () => liveListeners.delete(fn);
+}
+
+function emitLive() {
+  for (const fn of liveListeners) {
+    try {
+      fn();
+    } catch {
+      /* listener failed */
+    }
+  }
+}
 
 export function maskKey(key: string): string {
   if (!key) return "";
@@ -305,6 +322,22 @@ export async function startLiveFeeds(): Promise<void> {
     }
   } catch {
     /* ignore */
+  }
+  try {
+    if (typeof exchange.client.watchUser === "function" && accountAddress) {
+      const h = await exchange.client.watchUser(accountAddress);
+      if (h?.stop) stops.push(() => h.stop());
+    }
+  } catch {
+    /* user watch is optional */
+  }
+  try {
+    if (typeof exchange.client.subscribeLive === "function") {
+      const unsub = exchange.client.subscribeLive(() => emitLive());
+      if (typeof unsub === "function") stops.push(unsub);
+    }
+  } catch {
+    /* subscribeLive optional */
   }
   liveStop = () => {
     for (const stop of stops) {
@@ -668,6 +701,61 @@ export async function placeStake(args: {
     undefined;
 
   return { hash, raw: order };
+}
+
+export async function placeParlay(args: {
+  legs: Array<{ market: WindowMarket; side: Side; stake: number }>;
+}): Promise<{ legs: Array<{ marketId: string; side: Side; hash?: string; error?: string }> }> {
+  const out: Array<{ marketId: string; side: Side; hash?: string; error?: string }> = [];
+  for (const leg of args.legs) {
+    try {
+      const placed = await placeStake(leg);
+      out.push({ marketId: leg.market.marketId, side: leg.side, hash: placed.hash });
+    } catch (err) {
+      out.push({
+        marketId: leg.market.marketId,
+        side: leg.side,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (out.every((l) => l.error) && out.length > 0) {
+    throw new Error(out.map((l) => l.error).filter(Boolean).join(" · "));
+  }
+  return { legs: out };
+}
+
+export async function peekStatuses(marketIds: string[]): Promise<Map<string, { status: number; isResolved?: boolean; isVoided?: boolean }>> {
+  const map = new Map<string, { status: number; isResolved?: boolean; isVoided?: boolean }>();
+  if (!exchange) return map;
+  await Promise.all(
+    marketIds
+      .filter((id) => id.startsWith("0x"))
+      .map(async (id) => {
+        try {
+          const oc = await exchange!.client.getMarketOnchain(id as `0x${string}`);
+          map.set(id, { status: Number(oc.status), isResolved: oc.isResolved, isVoided: oc.isVoided });
+        } catch {
+          /* skip */
+        }
+      }),
+  );
+  return map;
+}
+
+export async function watchPools(pools: string[]): Promise<() => void> {
+  if (!exchange?.client.watchMarket) return () => undefined;
+  const stops: Array<() => void> = [];
+  for (const pool of pools) {
+    if (!pool.startsWith("0x")) continue;
+    try {
+      const h = await exchange.client.watchMarket(pool);
+      if (h?.stop) stops.push(() => h.stop());
+    } catch {
+      /* ignore */
+    }
+  }
+  return () => stops.forEach((s) => s());
 }
 
 function sideFromWinningOutcome(outcome: unknown): Side | null {
