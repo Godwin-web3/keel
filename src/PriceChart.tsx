@@ -10,7 +10,7 @@ export default function PriceChart({ points, height = 96 }: Props) {
   if (points.length < 2) {
     return (
       <div className="price-chart empty" style={{ height }}>
-        <span className="muted">Not enough trades yet to chart this window.</span>
+        <span className="muted">Chart fills in as people bet.</span>
       </div>
     );
   }
@@ -41,7 +41,7 @@ export default function PriceChart({ points, height = 96 }: Props) {
         <path d={path} className={`chart-line ${trendUp ? "up" : "down"}`} fill="none" strokeWidth={2} />
       </svg>
       <div className="chart-legend">
-        <span className="muted">Implied chance of Up</span>
+        <span className="muted">Chance it goes up</span>
         <strong className={trendUp ? "up" : "down"}>{Math.round(last.probUp * 100)}%</strong>
       </div>
     </div>

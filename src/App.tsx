@@ -55,6 +55,7 @@ import {
   type ProbabilityPoint,
 } from "./lib/sdk";
 import PriceChart from "./PriceChart";
+import Landing from "./Landing";
 import RunCard from "./RunCard";
 import { AssetAvatar, ChanceMeter, Identicon, RankMedal } from "./Brand";
 import { LogoWordmark } from "./Logo";
@@ -65,6 +66,7 @@ type HistoryFilter = "all" | "won" | "lost" | "collected";
 type PendingBet = { kind: "single"; side: Side } | { kind: "parlay"; a: Side; b: Side } | null;
 
 const DEFAULT_STAKE = 10;
+const APP_HASH = "#/app";
 const KIND_LABEL: Record<JournalRow["kind"], string> = {
   trade: "Filled",
   redeem: "Claimed",
@@ -90,7 +92,12 @@ function applyTheme(theme: Theme | null) {
   document.documentElement.dataset.theme = theme ?? "dark";
 }
 
+function isAppRoute(): boolean {
+  return window.location.hash === APP_HASH;
+}
+
 export default function App() {
+  const [entered, setEntered] = useState(isAppRoute);
   const [tab, setTab] = useState<Tab>("markets");
   const [assetFilter, setAssetFilter] = useState<"ALL" | "BTC" | "ETH">("ALL");
   const [network, setNetwork] = useState<NetworkName>("shannon");
@@ -126,6 +133,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme | null>(() => getStoredTheme());
   const [moreOpen, setMoreOpen] = useState(false);
   const [chartPoints, setChartPoints] = useState<ProbabilityPoint[]>([]);
+  const [sparks, setSparks] = useState<Record<string, ProbabilityPoint[]>>({});
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [leaderboardBusy, setLeaderboardBusy] = useState(false);
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
@@ -168,6 +176,36 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    function sync() {
+      setEntered(isAppRoute());
+    }
+    window.addEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+
+  function enterApp(marketId?: string) {
+    history.pushState(null, "", APP_HASH);
+    setEntered(true);
+    setTab("markets");
+    if (marketId) {
+      setSelectedId(marketId);
+      setPendingBet(null);
+      setBetOpen(true);
+    }
+  }
+
+  function exitToLanding() {
+    history.pushState(null, "", window.location.pathname + window.location.search);
+    setEntered(false);
+    setBetOpen(false);
+    setWalletOpen(false);
+  }
+
   function selectMarket(id: string) {
     setSelectedId(id);
     setPendingBet(null);
@@ -198,6 +236,23 @@ export default function App() {
       return live(a) - live(b) || a.expirySec - b.expirySec;
     });
   }, [markets, assetFilter]);
+
+  useEffect(() => {
+    const live = feedMarkets.filter((m) => m.status === "trading").slice(0, 8);
+    if (live.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      live.map(async (m) => {
+        const pts = await getMarketProbabilityHistory(m, { limit: 40 });
+        if (!cancelled && pts.length > 1) {
+          setSparks((s) => ({ ...s, [m.marketId]: pts }));
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [feedMarkets.map((m) => m.marketId).join("|")]);
 
   // Best-effort probability chart for whichever window is selected — refetched
   // whenever the selection changes. Never blocks the ticket panel on failure.
@@ -790,11 +845,15 @@ export default function App() {
     window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
+  if (!entered) {
+    return <Landing onLaunch={enterApp} markets={markets} nowMs={nowMs} />;
+  }
+
   return (
     <div className="app">
       <nav className="app-nav">
         <div className="brand-row">
-          <LogoWordmark />
+          <LogoWordmark onClick={exitToLanding} />
         </div>
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
@@ -929,7 +988,7 @@ export default function App() {
                 <p className="plain">
                   {selected.asset === "OTHER" ? "This market" : selected.asset} · {formatWindow(selected.timeframe)}
                 </p>
-                <PriceChart points={chartPoints} />
+                <PriceChart points={chartPoints} height={140} />
                 <p className="ticket-edge">{formatEdge(selected.impliedUp, spotMovePct(spotPrice, selected.strike))}</p>
                 {parlayPartner && (
                   <label className="parlay-toggle">
@@ -1218,6 +1277,9 @@ export default function App() {
                     </div>
                     {upPct !== null && <ChanceMeter pct={upPct} />}
                   </div>
+                  {sparks[m.marketId] && sparks[m.marketId].length > 1 && (
+                    <PriceChart points={sparks[m.marketId]} height={72} />
+                  )}
                   <div className="pm-actions">
                     <button
                       className="pm-up"

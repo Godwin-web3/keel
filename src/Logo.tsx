@@ -10,11 +10,19 @@ export function Logo({ size = 28 }: { size?: number }) {
   );
 }
 
-export function LogoWordmark() {
-  return (
-    <span className="brand-lockup">
+export function LogoWordmark({ onClick }: { onClick?: () => void }) {
+  const inner = (
+    <>
       <Logo size={30} />
       <span className="brand-name">Keel</span>
-    </span>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" className="brand-lockup brand-btn" onClick={onClick} aria-label="Keel home">
+        {inner}
+      </button>
+    );
+  }
+  return <span className="brand-lockup">{inner}</span>;
 }

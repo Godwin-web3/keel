@@ -1391,6 +1391,20 @@ th {
   gap: 10px;
 }
 
+.brand-btn {
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.brand-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+
 .brand-name {
   font-family: var(--font-display);
   font-size: 22px;
@@ -1677,4 +1691,93 @@ th {
   color: var(--muted);
   letter-spacing: 0.02em;
 }
+
+.price-chart {
+  margin: 10px 0 2px;
+  width: 100%;
+}
+
+.price-chart.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-3);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.chart-line.up {
+  stroke: var(--up);
+}
+
+.chart-line.down {
+  stroke: var(--down);
+}
+
+.chart-mid {
+  stroke: var(--line-strong);
+}
+
+.chart-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.landing {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 20px 64px;
+}
+
+.land-hero {
+  padding: 40px 0 28px;
+}
+
+.land-hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 7vw, 52px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+  max-width: 14ch;
+}
+
+.land-hero p {
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1.5;
+  max-width: 42ch;
+  margin: 14px 0 0;
+}
+
+.land-feature {
+  margin: 8px 0 36px;
+}
+
+.land-points {
+  list-style: none;
+  margin: 0 0 48px;
+  padding: 0;
+}
+
+.land-points li {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+
+.land-points strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 16px;
+}
+
+.land-points span {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 
