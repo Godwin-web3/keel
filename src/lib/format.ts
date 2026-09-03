@@ -1,4 +1,4 @@
-import type { MarketStatus, Side, TicketQuote, WindowMarket } from "./types";
+import type { MarketStatus, NetworkName, Side, TicketQuote, WindowMarket } from "./types";
 
 export const STATUS_LABEL: Record<MarketStatus, string> = {
   listed: "Coming up",
@@ -84,7 +84,7 @@ export function formatCountdown(secondsLeft: number): string {
 export function formatCloseLabel(expirySec: number, secondsLeft: number): string {
   if (!expirySec) return "Closing time unknown";
   const when = new Date(expirySec * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (secondsLeft > 0) return `Closes ${formatCountdown(secondsLeft)} · ${when}`;
+  if (secondsLeft > 0) return `Closes in ${formatCountdown(secondsLeft)}`;
   return `Closed ${when}`;
 }
 
@@ -99,6 +99,24 @@ export function formatUsd(n: number | null | undefined, digits = 2): string {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+export function coin(network: NetworkName): string {
+  return network === "mainnet" ? "USDso" : "tUSDC";
+}
+
+export function money(n: number | null | undefined, network: NetworkName, digits = 2): string {
+  const v = formatUsd(n, digits);
+  return v === "—" ? "—" : `${v} ${coin(network)}`;
+}
+
+export function formatWindow(tf: string): string {
+  if (tf.endsWith("m")) return `${tf.slice(0, -1)} min`;
+  if (tf.endsWith("h")) {
+    const n = tf.slice(0, -1);
+    return n === "1" ? "1 hour" : `${n} hours`;
+  }
+  return tf;
 }
 
 export function quoteTicket(side: Side, stake: number, impliedUp: number | null): TicketQuote {
@@ -122,7 +140,7 @@ export function plainLanguage(market: WindowMarket, stake: number, side: Side): 
   const q = quoteTicket(side, stake, p);
   const asset = market.asset === "OTHER" ? "This market" : market.asset;
   const sideWord = side === "up" ? "Up" : "Down";
-  return `${asset} looks like ${upPct} likely to finish Up. Bet ${sideWord}: put in ${formatUsd(stake)}, and if you're right you get about ${formatUsd(q.redeemIfWin)} back. If you're wrong, you lose the ${formatUsd(stake)} — never more.`;
+  return `${asset} is ${upPct} likely to go up. If you put ${formatUsd(stake)} on ${sideWord} and you're right, you get about ${formatUsd(q.redeemIfWin)} back. If you're wrong, you lose that amount — never more.`;
 }
 
 /** Book odds vs how far spot has already moved inside this window. */
@@ -131,7 +149,7 @@ export function formatEdge(impliedUp: number | null, spotMovePct: number | null)
     impliedUp === null || !Number.isFinite(impliedUp) ? "Book —" : `Book ${Math.round(impliedUp * 100)}% Up`;
   if (spotMovePct === null || !Number.isFinite(spotMovePct)) return book;
   const sign = spotMovePct > 0 ? "+" : "";
-  return `${book} · spot already ${sign}${spotMovePct.toFixed(2)}% this window`;
+  return `${book} · price already ${sign}${spotMovePct.toFixed(2)}%`;
 }
 
 export function spotMovePct(spot: number | null, strike: number | null): number | null {

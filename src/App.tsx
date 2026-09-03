@@ -7,6 +7,9 @@ import {
   formatEdge,
   formatProb,
   formatUsd,
+  formatWindow,
+  money,
+  coin,
   plainLanguage,
   quoteTicket,
   shorten,
@@ -55,7 +58,7 @@ import PriceChart from "./PriceChart";
 import RunCard from "./RunCard";
 import { AssetAvatar, ChanceMeter, Identicon, RankMedal } from "./Brand";
 import { LogoWordmark } from "./Logo";
-import { ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon } from "./Icons";
+import { ExternalLinkIcon, MarketsIcon, MenuIcon, MoonIcon, PositionsIcon, RunIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
 
 type Tab = "markets" | "run" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
@@ -330,7 +333,7 @@ export default function App() {
       const rows = await listWindows();
       setMarkets(rows);
       if (walletAddress) void discoverPositions(walletAddress);
-      if (!silent) setMessage({ kind: "ok", text: `${rows.length} windows.` });
+      if (!silent) setMessage({ kind: "ok", text: `${rows.length} markets.` });
     } catch (err) {
       if (!silent) setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -423,7 +426,7 @@ export default function App() {
       setWalletAddress(null);
       const rows = await listWindows();
       setMarkets(rows);
-      setMessage({ kind: "ok", text: `${rows.length} windows.` });
+      setMessage({ kind: "ok", text: `${rows.length} markets.` });
       return true;
     } catch (err) {
       setConnected(false);
@@ -451,7 +454,7 @@ export default function App() {
       setWalletOpen(false);
       setMessage({
         kind: "ok",
-        text: `Connected · ${maskKey(address)}. ${rows.length} windows.`,
+        text: `Connected · ${maskKey(address)}. ${rows.length} markets.`,
       });
       return true;
     } catch (err) {
@@ -624,7 +627,7 @@ export default function App() {
         note: `Run hop ${hopped.hops.length}/${hopped.maxRounds} · ${next.asset} ${next.timeframe}`,
       });
       setJournal(loadJournal());
-      setMessage({ kind: "ok", text: `Run riding ${next.asset} ${next.timeframe} with ${nextStake.toFixed(2)}.` });
+      setMessage({ kind: "ok", text: `Next round: ${next.asset} · ${money(nextStake, network)}.` });
     } finally {
       restakingRef.current = false;
     }
@@ -792,12 +795,11 @@ export default function App() {
       <nav className="app-nav">
         <div className="brand-row">
           <LogoWordmark />
-          <span className="net-chip">{network === "shannon" ? "Shannon" : "Somnia"}</span>
         </div>
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
             <button className="unclaimed-pill" onClick={() => setTab("desk")}>
-              ${formatUsd(totalUnclaimed)} to claim
+              {money(totalUnclaimed, network)} to claim
             </button>
           )}
           <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => setWalletOpen(true)}>
@@ -838,9 +840,6 @@ export default function App() {
           </div>
         </div>
       </nav>
-      {network === "shannon" && (
-        <div className="net-banner">Shannon testnet · tUSDC collateral · settlement is on-chain</div>
-      )}
 
       {walletOpen && (
         <div className="wallet-backdrop" onClick={() => setWalletOpen(false)}>
@@ -858,8 +857,8 @@ export default function App() {
                 onChange={(e) => onNetworkChange(e.target.value as NetworkName)}
                 disabled={signedIn || busy}
               >
-                <option value="shannon">Shannon testnet</option>
-                <option value="mainnet">Somnia</option>
+                <option value="shannon">Practice (tUSDC)</option>
+                <option value="mainnet">Live (USDso)</option>
               </select>
             </div>
 
@@ -892,8 +891,8 @@ export default function App() {
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
                   {injectedAvailable
-                    ? "MetaMask, Rabby, or any injected wallet. Browse is free until you connect."
-                    : "No wallet found. Install MetaMask or Rabby, then refresh."}
+                    ? "Use MetaMask or Rabby. You can look around first."
+                    : "No wallet found. Install MetaMask, then refresh."}
                 </p>
                 {!injectedAvailable && (
                   <a className="repo-link" href="https://metamask.io/download" target="_blank" rel="noreferrer">
@@ -906,10 +905,10 @@ export default function App() {
             <div className="muted" style={{ marginTop: 12 }}>
               {!signedIn &&
                 (connected
-                  ? "Connected as a reader — connect a wallet to trade."
+                  ? "Looking around — connect a wallet to bet."
                   : busy
-                    ? "Loading windows..."
-                    : "Windows load without a wallet.")}
+                    ? "Loading markets..."
+                    : "You can look around without a wallet.")}
             </div>
           </div>
         </div>
@@ -919,7 +918,7 @@ export default function App() {
         <div className="confirm-backdrop" onClick={closeBetSheet}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
-              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm parlay" : "Confirm") : "Ticket"}</h2>
+              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm both bets" : "Confirm") : "Place a bet"}</h2>
               <button className="ghost" onClick={closeBetSheet}>
                 Close
               </button>
@@ -928,7 +927,7 @@ export default function App() {
             {!pendingBet && (
               <>
                 <p className="plain">
-                  {selected.asset === "OTHER" ? "This market" : selected.asset} · Up or Down in {selected.timeframe}
+                  {selected.asset === "OTHER" ? "This market" : selected.asset} · {formatWindow(selected.timeframe)}
                 </p>
                 <PriceChart points={chartPoints} />
                 <p className="ticket-edge">{formatEdge(selected.impliedUp, spotMovePct(spotPrice, selected.strike))}</p>
@@ -939,7 +938,7 @@ export default function App() {
                       checked={parlayOn}
                       onChange={(e) => setParlayOn(e.target.checked)}
                     />
-                    Parlay {parlayPartner.asset} {parlayPartner.timeframe} in the same ticket. Pays only if both sides hit.
+                    Also bet on {parlayPartner.asset} in the same {formatWindow(parlayPartner.timeframe)}. You only get paid if both are right.
                   </label>
                 )}
                 {parlayOn && parlayPartner && (
@@ -954,9 +953,9 @@ export default function App() {
                   </div>
                 )}
                 <label className="stake-label">
-                  Stake
+                  How much ({coin(network)})
                   <div className="stake-input">
-                    <span>$</span>
+                    <span>{coin(network)}</span>
                     <input
                       type="number"
                       min={0.5}
@@ -970,31 +969,31 @@ export default function App() {
                   {parlayOn && parlayPartner ? (
                     <>
                       <div>
-                        <span>Both hit</span>
-                        {formatUsd(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).redeemIfWin)}
+                        <span>If both win</span>
+                        {money(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).redeemIfWin, network)}
                       </div>
                       <div>
-                        <span>Combined odds</span>
+                        <span>Chance both win</span>
                         {Math.round(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).implied * 100)}%
                       </div>
                       <div>
-                        <span>Max loss</span>
-                        {formatUsd(stake)}
+                        <span>If you're wrong</span>
+                        {money(stake, network)}
                       </div>
                     </>
                   ) : (
                     <>
                       <div>
-                        <span>You win if Up</span>
-                        {formatUsd(quoteTicket("up", stake, selected.impliedUp).redeemIfWin)}
+                        <span>If Up wins</span>
+                        {money(quoteTicket("up", stake, selected.impliedUp).redeemIfWin, network)}
                       </div>
                       <div>
-                        <span>You win if Down</span>
-                        {formatUsd(quoteTicket("down", stake, selected.impliedUp).redeemIfWin)}
+                        <span>If Down wins</span>
+                        {money(quoteTicket("down", stake, selected.impliedUp).redeemIfWin, network)}
                       </div>
                       <div>
-                        <span>Max loss</span>
-                        {formatUsd(stake)}
+                        <span>If you're wrong</span>
+                        {money(stake, network)}
                       </div>
                     </>
                   )}
@@ -1025,10 +1024,10 @@ export default function App() {
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
                   {selected.status !== "trading"
-                    ? "This window isn't open for new bets right now."
+                    ? "This one isn't open right now."
                     : !signedIn
-                      ? "Connect a wallet to trade."
-                      : "You can only lose the stake."}
+                      ? "Connect your wallet to place this."
+                      : "You only lose what you put in."}
                 </p>
               </>
             )}
@@ -1036,21 +1035,21 @@ export default function App() {
             {pendingBet && pendingBet.kind === "single" && (
               <>
                 <p className="muted" style={{ marginBottom: 14 }}>
-                  {selected.asset} {selected.timeframe} ·{" "}
+                  {selected.asset} · {formatWindow(selected.timeframe)} ·{" "}
                   <span className={`confirm-side ${pendingBet.side}`}>{pendingBet.side === "up" ? "Up" : "Down"}</span>
                 </p>
                 <div className="ticket-math">
                   <div>
-                    <span>You're staking</span>
-                    {formatUsd(stake)}
+                    <span>You put in</span>
+                    {money(stake, network)}
                   </div>
                   <div>
                     <span>You get back if right</span>
-                    {formatUsd(quoteTicket(pendingBet.side, stake, selected.impliedUp).redeemIfWin)}
+                    {money(quoteTicket(pendingBet.side, stake, selected.impliedUp).redeemIfWin, network)}
                   </div>
                   <div>
-                    <span>Max loss</span>
-                    {formatUsd(stake)}
+                    <span>If you're wrong</span>
+                    {money(stake, network)}
                   </div>
                 </div>
                 <div className="actions" style={{ marginTop: 16 }}>
@@ -1083,15 +1082,15 @@ export default function App() {
                 </p>
                 <div className="ticket-math">
                   <div>
-                    <span>Total stake</span>
-                    {formatUsd(stake)}
+                    <span>You put in</span>
+                    {money(stake, network)}
                   </div>
                   <div>
-                    <span>Both hit</span>
-                    {formatUsd(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).redeemIfWin)}
+                    <span>If both win</span>
+                    {money(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).redeemIfWin, network)}
                   </div>
                   <div>
-                    <span>Combined</span>
+                    <span>Chance both win</span>
                     {Math.round(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).implied * 100)}%
                   </div>
                 </div>
@@ -1105,7 +1104,7 @@ export default function App() {
                       void onParlay(a, b);
                     }}
                   >
-                    Confirm parlay
+                    Confirm both bets
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
@@ -1119,15 +1118,18 @@ export default function App() {
 
       {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
 
-      <div className="tabs">
+      <nav className="bottom-nav">
         <button className={tab === "markets" ? "active" : ""} onClick={() => setTab("markets")}>
+          <MarketsIcon size={22} />
           Markets
         </button>
         <button className={tab === "run" ? "active" : ""} onClick={() => setTab("run")}>
-          Run{run?.status === "running" ? " · live" : ""}
+          <RunIcon size={22} />
+          Run
         </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
-          Positions{claimable.length > 0 ? ` · ${claimable.length}` : ""}
+          <PositionsIcon size={22} />
+          Bets{claimable.length > 0 ? ` · ${claimable.length}` : ""}
         </button>
         <button
           className={tab === "leaderboard" ? "active" : ""}
@@ -1136,9 +1138,10 @@ export default function App() {
             if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
           }}
         >
-          Leaderboard
+          <TrophyIcon size={22} />
+          Leaders
         </button>
-      </div>
+      </nav>
 
       {tab === "run" && (
         <div className="grid single tab-enter">
@@ -1161,6 +1164,7 @@ export default function App() {
             onAsset={setRunAsset}
             onStart={() => void onStartRun()}
             onStop={onStopRun}
+            coin={coin(network)}
           />
         </div>
       )}
@@ -1177,7 +1181,7 @@ export default function App() {
               ))}
             </div>
           </div>
-          {!busy && !connected && <p className="muted">Couldn't load windows. Try refreshing.</p>}
+          {!busy && !connected && <p className="muted">Couldn't load markets. Try refresh.</p>}
           {busy && markets.length === 0 && (
             <div className="pm-grid">
               {[0, 1, 2, 3].map((i) => (
@@ -1190,7 +1194,7 @@ export default function App() {
             </div>
           )}
           {!busy && connected && feedMarkets.length === 0 && (
-            <p className="muted">No windows right now. Refresh in a moment.</p>
+            <p className="muted">No markets right now. Try again in a bit.</p>
           )}
           <div className="pm-grid tab-enter">
             {feedMarkets.slice(0, 24).map((m) => {
@@ -1208,12 +1212,9 @@ export default function App() {
                     <div className="pm-copy">
                       <p className="pm-kicker">
                         {live && <span className="live-pip" />}
-                        {m.asset} · {m.timeframe}
+                        {m.asset} · {formatWindow(m.timeframe)}
                       </p>
-                      <h3>
-                        Will {m.asset} close Up this window
-                        {m.strike ? ` from ${m.strike.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ""}?
-                      </h3>
+                      <h3>Will {m.asset} go up in the next {formatWindow(m.timeframe)}?</h3>
                     </div>
                     {upPct !== null && <ChanceMeter pct={upPct} />}
                   </div>
@@ -1225,7 +1226,7 @@ export default function App() {
                         openTicket(m, "up");
                       }}
                     >
-                      Up {upPct === null ? "" : `${upPct}¢`}
+                      Up {upPct === null ? "" : `${upPct}%`}
                     </button>
                     <button
                       className="pm-down"
@@ -1234,7 +1235,7 @@ export default function App() {
                         openTicket(m, "down");
                       }}
                     >
-                      Down {upPct === null ? "" : `${100 - upPct}¢`}
+                      Down {upPct === null ? "" : `${100 - upPct}%`}
                     </button>
                   </div>
                   <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
@@ -1248,7 +1249,7 @@ export default function App() {
       {tab === "desk" && (
         <div className="grid tab-enter">
           <section className="card">
-            <h2>Positions</h2>
+            <h2>Your bets</h2>
             <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <input
                 type="checkbox"
@@ -1256,7 +1257,7 @@ export default function App() {
                 onChange={(e) => setAutoClaim(e.target.checked)}
                 disabled={!signedIn}
               />
-              Claim winners automatically when they settle. Losers pay 0 and are skipped. Voids return both sides.
+              Pay me automatically when a bet settles.
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button
@@ -1273,28 +1274,27 @@ export default function App() {
                 Claim all winnings
               </button>
             </div>
-            <h3 className="muted">Still running</h3>
-            {open.length === 0 && <p className="muted">No bets in progress yet.</p>}
+            <h3 className="muted">Open</h3>
+            {open.length === 0 && <p className="muted">No open bets.</p>}
             {open.map((p) => (
               <div key={p.marketId + p.side} className="market">
                 <div className="market-top">
                   <strong className="market-name">
                     <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
-                    {p.asset} <span className="muted">· {p.timeframe}</span>
+                    {p.asset} <span className="muted">· {formatWindow(p.timeframe)}</span>
                   </strong>
                   <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
                 </div>
                 <div className="muted">
                   {p.stake !== null ? (
                     <>
-                      You bet {formatUsd(p.stake)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong> at{" "}
-                      {formatProb(p.entryProb)} odds
+                      You put {money(p.stake, network)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
+                      {p.entryProb !== null ? ` · ${formatProb(p.entryProb)} chance` : ""}
                     </>
                   ) : (
                     <>
                       You have {formatUsd(p.contracts, 3)} contracts on{" "}
                       <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
-                      {p.fromChain ? " (found on-chain)" : ""}
                     </>
                   )}
                 </div>
@@ -1302,21 +1302,20 @@ export default function App() {
             ))}
             <h3 className="muted">Ready to claim</h3>
             {claimable.length === 0 && (
-              <p className="muted">Nothing to claim yet. Keel also scans finalized windows on-chain, not just this browser's history.</p>
+              <p className="muted">Nothing to collect yet.</p>
             )}
             {claimable.map((c) => (
               <div key={`${c.marketId}:${c.side}`} className="market">
                 <div className="market-top">
                   <strong className="market-name">
                     <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
-                    {c.asset} <span className="muted">· {c.timeframe} · {c.side === "up" ? "Up" : "Down"}</span>
-                    {c.fromChain && <span className="muted"> · found on-chain</span>}
+                    {c.asset} <span className="muted">· {formatWindow(c.timeframe)} · {c.side === "up" ? "Up" : "Down"}</span>
                   </strong>
                   <button
                     disabled={busy || !signedIn}
                     onClick={() => void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout)}
                   >
-                    Claim {formatUsd(c.estimatedPayout)}
+                    Claim {money(c.estimatedPayout, network)}
                   </button>
                 </div>
               </div>
@@ -1328,15 +1327,15 @@ export default function App() {
               <div className="edge-headline">
                 <strong>{stats.winRate === null ? "—" : `${stats.winRate}%`}</strong>
                 <span>
-                  win rate{stats.settled > 0 ? ` · ${stats.wins} of ${stats.settled} settled bets` : " · nothing settled yet"}
+                  won{stats.settled > 0 ? ` · ${stats.wins} of ${stats.settled}` : " · nothing finished yet"}
                 </span>
               </div>
               <div className="edge-sub">
                 <span>
-                  Wagered <strong>${formatUsd(stats.wagered)}</strong>
+                  Put in <strong>{money(stats.wagered, network)}</strong>
                 </span>
                 <span>
-                  Won <strong>${formatUsd(stats.won)}</strong>
+                  Won <strong>{money(stats.won, network)}</strong>
                 </span>
               </div>
             </div>
@@ -1361,7 +1360,7 @@ export default function App() {
                   <tr>
                     <td colSpan={4} className="muted">
                       {journal.length === 0
-                        ? "No fills yet. Activity stays on this device."
+                        ? "Nothing here yet. This list stays on this phone or computer."
                         : "Nothing matches this filter."}
                     </td>
                   </tr>
@@ -1376,7 +1375,7 @@ export default function App() {
                     </td>
                     <td>
                       {row.side ? (row.side === "up" ? "Up" : "Down") + " · " : ""}
-                      {row.stake !== undefined ? `$${formatUsd(row.stake)} · ` : ""}
+                      {row.stake !== undefined ? `${money(row.stake, network)} · ` : ""}
                       {row.hash ? shorten(row.hash) : row.note || row.result || ""}
                       {row.kind === "redeem" && row.result === "win" && (
                         <button className="share-btn" onClick={() => shareWin(row)}>
@@ -1400,7 +1399,7 @@ export default function App() {
               {leaderboardBusy ? "Loading…" : "Refresh"}
             </button>
           </div>
-          <p className="muted lb-note">Wallets that bought the winning side on recent settled windows.</p>
+          <p className="muted lb-note">Who won recently — people who picked the right side.</p>
           <div className="lb-table">
             <div className="lb-cols">
               <span>Rank</span>
@@ -1410,11 +1409,11 @@ export default function App() {
             </div>
             {leaderboardBusy && leaderboard === null && (
               <div className="lb-empty">
-                <SpinnerIcon /> Reading settled windows…
+                <SpinnerIcon /> Loading…
               </div>
             )}
             {!leaderboardBusy && leaderboard !== null && leaderboard.length === 0 && (
-              <div className="lb-empty">No winning fills in the last settled windows.</div>
+              <div className="lb-empty">Nobody on the board yet.</div>
             )}
             {leaderboard?.map((entry, i) => (
               <div key={entry.address} className={`lb-row ${i < 3 ? "podium" : ""}`}>
@@ -1424,7 +1423,7 @@ export default function App() {
                   <span>{maskKey(entry.address)}</span>
                 </div>
                 <span className="lb-wins">{entry.wins}</span>
-                <span className="lb-won">${formatUsd(entry.volumeWon)}</span>
+                <span className="lb-won">{money(entry.volumeWon, network)}</span>
               </div>
             ))}
           </div>

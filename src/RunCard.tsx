@@ -29,6 +29,7 @@ export default function RunCard({
   onAsset,
   onStart,
   onStop,
+  coin,
 }: {
   markets: WindowMarket[];
   signedIn: boolean;
@@ -48,6 +49,7 @@ export default function RunCard({
   onAsset: (a: "BTC" | "ETH") => void;
   onStart: () => void;
   onStop: () => void;
+  coin: string;
 }) {
   const live = findLiveWindow(markets, asset);
   const active = run?.status === "running";
@@ -56,7 +58,7 @@ export default function RunCard({
     <section className="card run-card">
       <h2>Run</h2>
       <p className="muted" style={{ marginTop: -4, marginBottom: 14 }}>
-        Repeat the next window until a limit you set. Cash out, stop, or max rounds — then it stops.
+        Keep betting on the next round until you hit a limit. Then it stops for you.
       </p>
 
       {run && (
@@ -70,15 +72,15 @@ export default function RunCard({
           <div className="ticket-math">
             <div>
               <span>Started</span>
-              {formatUsd(run.bankrollStart)}
+              {formatUsd(run.bankrollStart)} {coin}
             </div>
             <div>
               <span>Now</span>
-              {formatUsd(run.bankrollNow)}
+              {formatUsd(run.bankrollNow)} {coin}
             </div>
             <div>
-              <span>Peak</span>
-              {formatUsd(run.peak)}
+              <span>Best</span>
+              {formatUsd(run.peak)} {coin}
             </div>
           </div>
           {run.stopReason && <p className="muted">{run.stopReason}</p>}
@@ -86,7 +88,7 @@ export default function RunCard({
             {run.hops.map((h, i) => (
               <li key={`${h.marketId}-${i}`}>
                 <span>
-                  #{i + 1} {h.asset} {h.side === "up" ? "Up" : "Down"} · ${formatUsd(h.stake)}
+                  #{i + 1} {h.asset} {h.side === "up" ? "Up" : "Down"} · {formatUsd(h.stake)} {coin}
                 </span>
                 <span className={h.result ?? "pending"}>{h.result ?? "live"}</span>
               </li>
@@ -95,7 +97,7 @@ export default function RunCard({
           {active && (
             <div className="actions" style={{ marginTop: 12 }}>
               <button className="ghost" disabled={busy} onClick={onStop}>
-                Stop now — keep what's left
+                Stop and keep what's left
               </button>
             </div>
           )}
@@ -106,15 +108,15 @@ export default function RunCard({
         <>
           <div className="run-grid">
             <label>
-              Starting stake
+              Starting amount ({coin})
               <input type="number" min={1} step={1} value={stake} onChange={(e) => onStake(Number(e.target.value))} />
             </label>
             <label>
-              Cash out at
+              Cash out at ({coin})
               <input type="number" min={1} step={1} value={cashOutAt} onChange={(e) => onCashOutAt(Number(e.target.value))} />
             </label>
             <label>
-              Stop at
+              Stop if I drop to ({coin})
               <input type="number" min={0} step={1} value={stopAt} onChange={(e) => onStopAt(Number(e.target.value))} />
             </label>
             <label>
@@ -132,19 +134,19 @@ export default function RunCard({
           </div>
           <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", margin: "12px 0" }}>
             <input type="checkbox" checked={sameSide} onChange={(e) => onSameSide(e.target.checked)} />
-            Repeat the same side each window
+            Repeat Up or Down each round
           </label>
           <p className="muted">
             {live
-              ? `First hop: ${live.asset} ${live.timeframe} live now.`
-              : `No live ${asset} window right now.`}
+              ? `${live.asset} is live now.`
+              : `No live ${asset} market right now.`}
           </p>
           <div className="actions" style={{ marginTop: 12 }}>
             <button disabled={busy || !signedIn || !live} onClick={onStart}>
               Start run
             </button>
           </div>
-          {!signedIn && <p className="muted">Connect a wallet first.</p>}
+          {!signedIn && <p className="muted">Connect your wallet first.</p>}
         </>
       )}
     </section>
