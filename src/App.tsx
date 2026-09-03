@@ -51,10 +51,11 @@ import {
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
-import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
 import RunCard from "./RunCard";
-import { ExternalLinkIcon, KeelMark, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
+import { AssetAvatar, ChanceMeter, Identicon, RankMedal } from "./Brand";
+import { LogoWordmark } from "./Logo";
+import { ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon } from "./Icons";
 
 type Tab = "markets" | "run" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
@@ -69,21 +70,6 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   parlay: "Parlay",
   run: "Run",
 };
-
-// Windows this long or shorter render a countdown ring — a 1h+ window ticking
-// down visually all session is just noise, not urgency.
-const RING_MAX_SECONDS = 20 * 60;
-
-function timeframeSeconds(timeframe: string): number {
-  if (timeframe.endsWith("h")) return Number(timeframe.slice(0, -1)) * 3600;
-  if (timeframe.endsWith("m")) return Number(timeframe.slice(0, -1)) * 60;
-  return RING_MAX_SECONDS;
-}
-
-function slotLabel(index: number, status: MarketStatus): string {
-  if (status === "trading") return "Live";
-  return index === 0 ? "Next" : "Later";
-}
 
 type Theme = "light" | "dark";
 const THEME_KEY = "keel.theme";
@@ -103,6 +89,7 @@ function applyTheme(theme: Theme | null) {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("markets");
+  const [assetFilter, setAssetFilter] = useState<"ALL" | "BTC" | "ETH">("ALL");
   const [network, setNetwork] = useState<NetworkName>("shannon");
   const [connected, setConnected] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
@@ -180,6 +167,13 @@ export default function App() {
 
   function selectMarket(id: string) {
     setSelectedId(id);
+    setPendingBet(null);
+    setBetOpen(true);
+  }
+
+  function openTicket(m: WindowMarket, side: Side) {
+    setSelectedId(m.marketId);
+    setPendingBet({ kind: "single", side });
     setBetOpen(true);
   }
 
@@ -194,23 +188,13 @@ export default function App() {
     [selected, markets],
   );
 
-  // Group windows by asset+cadence and order soonest-first, so each group can
-  // render as a Live/Next/Later round carousel instead of one flat list.
-  const roundGroups = useMemo(() => {
-    const byKey = new Map<string, WindowMarket[]>();
-    for (const m of markets) {
-      const key = `${m.asset}:${m.timeframe}`;
-      const arr = byKey.get(key) ?? [];
-      arr.push(m);
-      byKey.set(key, arr);
-    }
-    return [...byKey.entries()]
-      .map(([key, list]) => {
-        const rounds = [...list].sort((a, b) => a.expirySec - b.expirySec);
-        return { key, asset: rounds[0].asset, timeframe: rounds[0].timeframe, rounds };
-      })
-      .sort((a, b) => a.rounds[0].expirySec - b.rounds[0].expirySec);
-  }, [markets]);
+  const feedMarkets = useMemo(() => {
+    const list = markets.filter((m) => assetFilter === "ALL" || m.asset === assetFilter);
+    return [...list].sort((a, b) => {
+      const live = (m: WindowMarket) => (m.status === "trading" ? 0 : 1);
+      return live(a) - live(b) || a.expirySec - b.expirySec;
+    });
+  }, [markets, assetFilter]);
 
   // Best-effort probability chart for whichever window is selected — refetched
   // whenever the selection changes. Never blocks the ticket panel on failure.
@@ -461,7 +445,6 @@ export default function App() {
       setConnected(true);
       setSignedIn(true);
       setWalletAddress(address);
-      setShowKeyFallback(false);
       const rows = await listWindows();
       setMarkets(rows);
       void discoverPositions(address);
@@ -807,21 +790,18 @@ export default function App() {
   return (
     <div className="app">
       <nav className="app-nav">
-        <span className="wordmark">
-          <span className="mark" aria-hidden>
-            <KeelMark />
-          </span>
-          Keel
+        <div className="brand-row">
+          <LogoWordmark />
           <span className="net-chip">{network === "shannon" ? "Shannon" : "Somnia"}</span>
-        </span>
+        </div>
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
             <button className="unclaimed-pill" onClick={() => setTab("desk")}>
               ${formatUsd(totalUnclaimed)} to claim
             </button>
           )}
-          <button className={`wallet-trigger ${signedIn ? "signed-in" : ""}`} onClick={() => setWalletOpen(true)}>
-            {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
+          <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => setWalletOpen(true)}>
+            {signedIn && walletAddress ? maskKey(walletAddress) : "Connect"}
           </button>
           <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>
             {(theme ?? "dark") === "dark" ? (
@@ -842,18 +822,6 @@ export default function App() {
               <>
                 <div className="menu-catcher" onClick={() => setMoreOpen(false)} />
                 <div className="dropdown-menu">
-                  <button
-                    className="dropdown-item"
-                    onClick={() => {
-                      setTab("leaderboard");
-                      setMoreOpen(false);
-                      if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
-                    }}
-                  >
-                    <TrophyIcon />
-                    Leaderboard
-                  </button>
-                  <div className="dropdown-divider" />
                   <a
                     className="dropdown-item"
                     href="https://github.com/Godwin-web3/keel"
@@ -1161,6 +1129,15 @@ export default function App() {
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
           Positions{claimable.length > 0 ? ` · ${claimable.length}` : ""}
         </button>
+        <button
+          className={tab === "leaderboard" ? "active" : ""}
+          onClick={() => {
+            setTab("leaderboard");
+            if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
+          }}
+        >
+          Leaderboard
+        </button>
       </div>
 
       {tab === "run" && (
@@ -1189,75 +1166,81 @@ export default function App() {
       )}
 
       {tab === "markets" && (
-        <section className="card markets-full">
-          <h2>Windows</h2>
-          <p className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
-            BTC and ETH event contracts. Tap a live window to trade or parlay.
-          </p>
+        <section className="feed">
+          <div className="feed-head">
+            <h1>Markets</h1>
+            <div className="asset-chips">
+              {(["ALL", "BTC", "ETH"] as const).map((a) => (
+                <button key={a} className={assetFilter === a ? "on" : ""} onClick={() => setAssetFilter(a)}>
+                  {a === "ALL" ? "All" : a}
+                </button>
+              ))}
+            </div>
+          </div>
           {!busy && !connected && <p className="muted">Couldn't load windows. Try refreshing.</p>}
           {busy && markets.length === 0 && (
-            <div className="market-list">
-              {[0, 1].map((i) => (
-                <div key={i} className="round-group">
-                  <div className="skeleton skeleton-line" style={{ width: 120, height: 15, marginBottom: 10 }} />
-                  <div className="round-card skeleton-card">
-                    <div className="market-top">
-                      <div className="skeleton skeleton-line" style={{ width: 44, height: 11 }} />
-                      <div className="skeleton skeleton-circle" style={{ width: 26, height: 26 }} />
-                    </div>
-                    <div className="skeleton skeleton-line" style={{ height: 8, borderRadius: 999, margin: "12px 0 8px" }} />
-                    <div className="skeleton skeleton-line" style={{ width: "70%", height: 13 }} />
-                    <div className="skeleton skeleton-line" style={{ width: "45%", height: 11, marginTop: 10 }} />
-                  </div>
+            <div className="pm-grid">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="pm-card skeleton-card">
+                  <div className="skeleton skeleton-circle" style={{ width: 40, height: 40 }} />
+                  <div className="skeleton skeleton-line" style={{ width: "70%", height: 16, marginTop: 12 }} />
+                  <div className="skeleton skeleton-line" style={{ height: 36, marginTop: 16 }} />
                 </div>
               ))}
             </div>
           )}
-          {!busy && connected && markets.length === 0 && (
-            <p className="muted">No windows returned right now. Try refreshing in a moment.</p>
+          {!busy && connected && feedMarkets.length === 0 && (
+            <p className="muted">No windows right now. Refresh in a moment.</p>
           )}
-          <div className="market-list tab-enter">
-            {roundGroups.map((group) => (
-              <div key={group.key} className="round-group">
-                <div className="round-group-head">
-                  <span className="asset-icon">{ASSET_ICON[group.asset]}</span>
-                  {group.asset} · {group.timeframe}
-                </div>
-                <div className="round-track">
-                  {group.rounds.slice(0, 4).map((m, idx) => {
-                    const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
-                    const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
-                    const slot = slotLabel(idx, m.status);
-                    const totalSeconds = timeframeSeconds(m.timeframe);
-                    return (
-                      <article
-                        key={m.marketId}
-                        className={`round-card ${slot === "Live" ? "live" : ""} ${selected?.marketId === m.marketId ? "selected" : ""}`}
-                        onClick={() => selectMarket(m.marketId)}
-                      >
-                        <div className="market-top">
-                          <span className="round-slot">{slot}</span>
-                          {secondsLeft > 0 && secondsLeft <= totalSeconds && (
-                            <CountdownRing secondsLeft={secondsLeft} totalSeconds={totalSeconds} size={26} />
-                          )}
-                        </div>
-                        <div className="odds-bar">
-                          <div className="odds-bar-up" style={{ width: `${upPct ?? 50}%` }} />
-                          <div className="odds-bar-down" style={{ width: `${100 - (upPct ?? 50)}%` }} />
-                        </div>
-                        <div className="odds-labels">
-                          <span className="odds-up">Up {upPct === null ? "—" : `${upPct}%`}</span>
-                          <span className="odds-down">Down {upPct === null ? "—" : `${100 - upPct}%`}</span>
-                        </div>
-                        <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
-                          {formatCloseLabel(m.expirySec, secondsLeft)}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+          <div className="pm-grid tab-enter">
+            {feedMarkets.slice(0, 24).map((m) => {
+              const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
+              const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
+              const live = m.status === "trading";
+              return (
+                <article
+                  key={m.marketId}
+                  className={`pm-card ${live ? "live" : ""} ${selected?.marketId === m.marketId ? "selected" : ""}`}
+                  onClick={() => selectMarket(m.marketId)}
+                >
+                  <div className="pm-top">
+                    <AssetAvatar asset={m.asset} size={42} />
+                    <div className="pm-copy">
+                      <p className="pm-kicker">
+                        {live && <span className="live-pip" />}
+                        {m.asset} · {m.timeframe}
+                      </p>
+                      <h3>
+                        Will {m.asset} close Up this window
+                        {m.strike ? ` from ${m.strike.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ""}?
+                      </h3>
+                    </div>
+                    {upPct !== null && <ChanceMeter pct={upPct} />}
+                  </div>
+                  <div className="pm-actions">
+                    <button
+                      className="pm-up"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openTicket(m, "up");
+                      }}
+                    >
+                      Up {upPct === null ? "" : `${upPct}¢`}
+                    </button>
+                    <button
+                      className="pm-down"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openTicket(m, "down");
+                      }}
+                    >
+                      Down {upPct === null ? "" : `${100 - upPct}¢`}
+                    </button>
+                  </div>
+                  <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
@@ -1410,38 +1393,42 @@ export default function App() {
       )}
 
       {tab === "leaderboard" && (
-        <div className="grid single tab-enter">
-          <section className="card">
-            <h2>Recent winning stakes</h2>
-            <p className="muted" style={{ marginBottom: 14 }}>
-              Built from real fills on the last few settled windows — the wallets who bought onto the side that ended
-              up winning. Not a full profit ranking (losing windows aren't netted out), just recent activity.
-            </p>
-            {leaderboardBusy && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)", fontSize: 13 }}>
-                <SpinnerIcon /> Reading recent settled windows...
+        <section className="lb">
+          <div className="lb-head">
+            <h1>Leaderboard</h1>
+            <button className="ghost" disabled={leaderboardBusy} onClick={() => void loadLeaderboard()}>
+              {leaderboardBusy ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+          <p className="muted lb-note">Wallets that bought the winning side on recent settled windows.</p>
+          <div className="lb-table">
+            <div className="lb-cols">
+              <span>Rank</span>
+              <span>Trader</span>
+              <span>Wins</span>
+              <span>Won</span>
+            </div>
+            {leaderboardBusy && leaderboard === null && (
+              <div className="lb-empty">
+                <SpinnerIcon /> Reading settled windows…
               </div>
             )}
             {!leaderboardBusy && leaderboard !== null && leaderboard.length === 0 && (
-              <p className="muted">No winning fills found in the recent settled windows.</p>
+              <div className="lb-empty">No winning fills in the last settled windows.</div>
             )}
-            {!leaderboardBusy &&
-              leaderboard !== null &&
-              leaderboard.map((entry, i) => (
-                <div key={entry.address} className="leaderboard-row">
-                  <span className="leaderboard-rank">#{i + 1}</span>
-                  <span className="leaderboard-addr">{maskKey(entry.address)}</span>
-                  <span className="muted">{entry.wins} win{entry.wins === 1 ? "" : "s"}</span>
-                  <span className="leaderboard-amount">${formatUsd(entry.volumeWon)}</span>
+            {leaderboard?.map((entry, i) => (
+              <div key={entry.address} className={`lb-row ${i < 3 ? "podium" : ""}`}>
+                <RankMedal rank={i + 1} />
+                <div className="lb-trader">
+                  <Identicon seed={entry.address} size={32} />
+                  <span>{maskKey(entry.address)}</span>
                 </div>
-              ))}
-            <div className="actions" style={{ marginTop: 14 }}>
-              <button className="ghost" disabled={leaderboardBusy} onClick={() => void loadLeaderboard()}>
-                Refresh
-              </button>
-            </div>
-          </section>
-        </div>
+                <span className="lb-wins">{entry.wins}</span>
+                <span className="lb-won">${formatUsd(entry.volumeWon)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
