@@ -2,6 +2,15 @@ type IconProps = { size?: number };
 
 const base = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
+export function KeelMark({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 19 L12 4 L19 19" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M4 20 H20" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
 export function MenuIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...base}>

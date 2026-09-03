@@ -676,7 +676,7 @@ export async function placeStake(args: {
   side: Side;
   stake: number;
 }): Promise<{ hash?: string; raw: unknown }> {
-  if (!exchange) throw new Error("Exchange is not connected. Add a session key first.");
+  if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
   await assertTrading(args.market.marketId);
 
   const implied = args.market.impliedUp ?? 0.5;
@@ -823,7 +823,7 @@ async function redeemOneSide(marketId: string, side: Side, oc: any): Promise<any
       );
     }
     if (!accountAddress) {
-      throw new Error("No session key connected. Add a session key before redeeming.");
+      throw new Error("No wallet connected. Connect before redeeming.");
     }
 
     const outcomeIdx = side === "up" ? 0 : 1;

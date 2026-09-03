@@ -1,31 +1,25 @@
 import CountdownRing from "./CountdownRing";
-import PriceChart from "./PriceChart";
-import type { ProbabilityPoint } from "./lib/sdk";
+import { KeelMark } from "./Icons";
 
-const DEMO_CHART: ProbabilityPoint[] = [0.5, 0.53, 0.58, 0.55, 0.6, 0.64, 0.61, 0.66, 0.69, 0.65].map((p, i) => ({
-  t: Date.now() - (10 - i) * 60_000,
-  probUp: p,
-}));
-
-const BENEFITS = [
+const INSTRUMENTS = [
   {
-    title: "Parlay two windows the venue cannot list",
-    body: "BTC Up and ETH Down in the same minute. Combined payout. DreamDEX sells atoms. Keel sells the molecule.",
+    kicker: "01",
+    name: "Parlay",
+    line: "Two windows. One stake.",
+    body: "BTC and ETH in the same minute. Combined odds. The book cannot quote this — it only lists atoms.",
   },
   {
-    title: "A run with rails, not a checkbox",
-    body: "Start with $10. Cash out at $18. Stop at $5. Max five windows. Keel claims, restakes the successor, and halts itself.",
+    kicker: "02",
+    name: "Run",
+    line: "N windows. Hard rails.",
+    body: "Cash-out, stop-loss, max rounds. Keel claims, restakes the successor, and stops itself.",
   },
   {
-    title: "Settlement that pays you",
-    body: "Event Contracts never send winnings. Keel watches MarketFinalized on your open windows and pulls the USDso — no Claim tap.",
+    kicker: "03",
+    name: "Claim",
+    line: "Settlement that pays.",
+    body: "Event Contracts never send winnings. Keel watches your open windows and pulls USDso when they finalize.",
   },
-];
-
-const STEPS = [
-  { title: "Call one side — or parlay both assets", body: "One window, or BTC × ETH in the same breath." },
-  { title: "Start a run", body: "Set cash-out, stop-loss, max rounds. Keel rides successors until a rail hits." },
-  { title: "Get paid", body: "Winners redeem as they settle. Losers are skipped. Voids return both sides." },
 ];
 
 export default function Landing({ onLaunch }: { onLaunch: () => void }) {
@@ -33,46 +27,55 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
     <div className="landing">
       <nav className="app-nav">
         <span className="wordmark">
-          <span className="mark">K</span>
+          <span className="mark" aria-hidden>
+            <KeelMark />
+          </span>
           Keel
         </span>
         <div className="row" style={{ margin: 0 }}>
           <a className="repo-link" href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
-            View source
+            Source
           </a>
           <button className="cta" onClick={onLaunch}>
-            Launch app
+            Open the desk
           </button>
         </div>
       </nav>
 
       <header className="hero">
-        <div className="hero-copy">
-          <span className="kicker">Live on Somnia</span>
-          <h1>
-            Not a market. <span className="accent">A session.</span>
-          </h1>
-          <p>
-            Parlay BTC × ETH in one ticket. Ride a run that stops itself. Get paid when the window settles — the venue
-            will not send it.
-          </p>
-          <div className="hero-actions">
-            <button onClick={onLaunch}>Launch app — free to browse</button>
-          </div>
-          <p className="hero-note">No sign-up · connect a wallet only when you're ready to bet</p>
+        <p className="kicker">Somnia · Event Contracts</p>
+        <h1>
+          The venue sells a window.
+          <em> Keel sells the session.</em>
+        </h1>
+        <p className="hero-lede">
+          Parlay two assets. Ride a run that halts on rails. Get paid when the window settles — because the protocol
+          will not send it to you.
+        </p>
+        <div className="hero-actions">
+          <button onClick={onLaunch}>Browse live windows</button>
+          <button className="ghost" onClick={onLaunch}>
+            Start a run
+          </button>
         </div>
+      </header>
 
-        <div className="card demo-ticket">
-          <h2>Parlay</h2>
-          <p className="plain">BTC Up × ETH Down · same window</p>
-          <PriceChart points={DEMO_CHART} />
-          <div className="market-top" style={{ margin: "14px 0" }}>
-            <span className="round-slot" style={{ color: "var(--up)" }}>
-              Live
-            </span>
-            <CountdownRing secondsLeft={134} totalSeconds={300} size={26} />
-          </div>
+      <div className="instrument-grid">
+        <article className="instrument-card">
+          <header>
+            <span>Parlay</span>
+            <CountdownRing secondsLeft={134} totalSeconds={300} size={22} />
+          </header>
+          <p className="instrument-pair">
+            BTC <b className="up">Up</b>
+            <i>×</i>
+            ETH <b className="down">Down</b>
+          </p>
           <div className="ticket-math">
+            <div>
+              <span>Stake</span>
+              10.00
+            </div>
             <div>
               <span>Both hit</span>
               34.20
@@ -81,57 +84,77 @@ export default function Landing({ onLaunch }: { onLaunch: () => void }) {
               <span>Combined</span>
               29%
             </div>
-            <div>
-              <span>Most you can lose</span>
-              10.00
-            </div>
           </div>
-          <div className="actions">
-            <button className="up" tabIndex={-1}>
-              Up × Down
-            </button>
-            <button className="down" tabIndex={-1}>
-              Down × Up
-            </button>
-          </div>
-        </div>
-      </header>
+          <p className="muted">One ticket. Two independent Event Contracts. Both must hit.</p>
+        </article>
 
-      <p className="section-label">Why it feels different</p>
-      <div className="benefit-list">
-        {BENEFITS.map((f, i) => (
-          <div className="benefit-row" key={f.title}>
-            <div className="num">0{i + 1}</div>
-            <div>
-              <h3>{f.title}</h3>
-              <p>{f.body}</p>
-            </div>
-          </div>
-        ))}
+        <article className="instrument-card">
+          <header>
+            <span>Run</span>
+            <em className="live-dot">Riding</em>
+          </header>
+          <ol className="run-preview">
+            <li>
+              <span>Hop 1</span> 10.00 <b className="up">win</b>
+            </li>
+            <li>
+              <span>Hop 2</span> 15.40 <b className="up">win</b>
+            </li>
+            <li className="now">
+              <span>Hop 3</span> 18.00 <b>cash-out</b>
+            </li>
+          </ol>
+          <p className="muted">Rails: cash 18 · stop 5 · max 5. The venue cannot halt this.</p>
+        </article>
+
+        <article className="instrument-card">
+          <header>
+            <span>Claim</span>
+            <em className="live-dot watching">Watching</em>
+          </header>
+          <p className="claim-copy">
+            MarketFinalized
+            <br />
+            <strong>redeem → wallet</strong>
+          </p>
+          <p className="muted">Winners pull. Losers skip (they pay 0). Voids redeem both sides at 0.5.</p>
+        </article>
       </div>
 
-      <p className="section-label">How it works</p>
-      <div className="step-flow">
-        {STEPS.map((s, i) => (
-          <div className="step" key={s.title}>
-            <div className="num">0{i + 1}</div>
-            <h4>{s.title}</h4>
-            <p>{s.body}</p>
+      <div className="waterline" aria-hidden />
+
+      {INSTRUMENTS.map((item) => (
+        <section className="chapter" key={item.name}>
+          <div className="chapter-index">{item.kicker}</div>
+          <div>
+            <h2>{item.name}</h2>
+            <p className="chapter-line">{item.line}</p>
+            <p>{item.body}</p>
           </div>
-        ))}
-      </div>
+        </section>
+      ))}
+
+      <section className="close-band">
+        <h2>A session, not a feed.</h2>
+        <p>
+          Polymarket is a catalog of questions. Keel is a clock: five-minute windows, composed, ridden, and paid.
+          Connect a wallet only when you are ready to write.
+        </p>
+        <button onClick={onLaunch}>Open the desk</button>
+      </section>
 
       <footer className="landing-footer">
-        <span>Built for the Somnia × DreamDEX hackathon</span>
+        <span>Somnia × DreamDEX</span>
         <div className="links">
           <a href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">
             GitHub
           </a>
           <a href="https://docs.dreamdex.io/developers/event-contracts" target="_blank" rel="noreferrer">
-            Event Contracts docs
+            Event Contracts
           </a>
         </div>
       </footer>
     </div>
   );
 }
+

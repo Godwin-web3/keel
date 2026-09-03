@@ -55,7 +55,7 @@ import Landing from "./Landing";
 import CountdownRing from "./CountdownRing";
 import PriceChart from "./PriceChart";
 import RunCard from "./RunCard";
-import { ExternalLinkIcon, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
+import { ExternalLinkIcon, KeelMark, MenuIcon, MoonIcon, SpinnerIcon, SunIcon, TrophyIcon } from "./Icons";
 
 type Tab = "markets" | "run" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
@@ -100,8 +100,7 @@ function getStoredTheme(): Theme | null {
 }
 
 function applyTheme(theme: Theme | null) {
-  if (theme) document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
+  document.documentElement.dataset.theme = theme ?? "dark";
 }
 
 function isAppRoute(): boolean {
@@ -112,12 +111,10 @@ export default function App() {
   const [entered, setEntered] = useState(isAppRoute);
   const [tab, setTab] = useState<Tab>("markets");
   const [network, setNetwork] = useState<NetworkName>("shannon");
-  const [privateKey, setPrivateKey] = useState("");
   const [connected, setConnected] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [injectedAvailable, setInjectedAvailable] = useState(false);
-  const [showKeyFallback, setShowKeyFallback] = useState(false);
   const [walletOpen, setWalletOpen] = useState(false);
   const [onchainPositions, setOnchainPositions] = useState<{ open: OpenPosition[]; claimable: Claimable[] }>({
     open: [],
@@ -173,8 +170,7 @@ export default function App() {
   }, [theme]);
 
   function toggleTheme() {
-    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const current = theme ?? (systemDark ? "dark" : "light");
+    const current = theme ?? "dark";
     const next: Theme = current === "dark" ? "light" : "dark";
     setTheme(next);
     try {
@@ -462,18 +458,16 @@ export default function App() {
     };
   }, [signedIn, open, walletAddress]);
 
-  async function connectAndLoad(net: NetworkName, key?: string): Promise<boolean> {
+  async function connectAndLoad(net: NetworkName): Promise<boolean> {
     setBusy(true);
     setMessage(null);
     try {
-      await connectExchange({ network: net, privateKey: key });
+      await connectExchange({ network: net });
       setConnected(true);
-      setSignedIn(Boolean(key));
-      const address = getAccountAddress();
-      setWalletAddress(address);
+      setSignedIn(false);
+      setWalletAddress(null);
       const rows = await listWindows();
       setMarkets(rows);
-      if (address) void discoverPositions(address);
       setMessage({ kind: "ok", text: `Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.` });
       return true;
     } catch (err) {
@@ -500,6 +494,7 @@ export default function App() {
       const rows = await listWindows();
       setMarkets(rows);
       void discoverPositions(address);
+      setWalletOpen(false);
       setMessage({
         kind: "ok",
         text: `Wallet connected · ${maskKey(address)}. Found ${rows.length} window${rows.length === 1 ? "" : "s"} to bet on.`,
@@ -547,7 +542,6 @@ export default function App() {
     disconnectExchange();
     setConnected(false);
     setSignedIn(false);
-    setPrivateKey("");
     setWalletAddress(null);
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
@@ -851,7 +845,9 @@ export default function App() {
     <div className="app">
       <nav className="app-nav">
         <button className="wordmark" onClick={exitToLanding}>
-          <span className="mark">K</span>
+          <span className="mark" aria-hidden>
+            <KeelMark />
+          </span>
           Keel
         </button>
         <div className="nav-actions">
@@ -864,7 +860,7 @@ export default function App() {
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect Wallet"}
           </button>
           <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>
-            {(theme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? (
+            {(theme ?? "dark") === "dark" ? (
               <SunIcon />
             ) : (
               <MoonIcon />
@@ -958,59 +954,16 @@ export default function App() {
                       "Connect Wallet"
                     )}
                   </button>
-                  <button className="ghost" onClick={() => void refresh()} disabled={busy || !connected}>
-                    Refresh
-                  </button>
                 </div>
-                <p className="muted" style={{ marginTop: 4, marginBottom: 12 }}>
+                <p className="muted" style={{ marginTop: 12 }}>
                   {injectedAvailable
-                    ? "Detects MetaMask, Rabby, or whatever wallet you have installed — no key to paste."
-                    : "No wallet extension found. Install MetaMask or Rabby, or use a private key below."}
+                    ? "MetaMask, Rabby, or any injected wallet. Browse is free until you connect."
+                    : "No wallet found. Install MetaMask or Rabby, then refresh."}
                 </p>
-
-                {injectedAvailable && (
-                  <button
-                    className="advanced-toggle"
-                    onClick={() => setShowKeyFallback((v) => !v)}
-                    type="button"
-                  >
-                    {showKeyFallback ? "Hide" : "Use a private key instead (advanced)"}
-                  </button>
-                )}
-
-                {(showKeyFallback || !injectedAvailable) && (
-                  <div className="advanced-panel">
-                    <label>Session private key</label>
-                    <div className="row">
-                      <input
-                        type="password"
-                        placeholder="0x... a spending key, never your main wallet"
-                        value={privateKey}
-                        onChange={(e) => setPrivateKey(e.target.value)}
-                        autoComplete="off"
-                      />
-                    </div>
-                    <div className="row">
-                      <button
-                        className="ghost"
-                        onClick={() => {
-                          void (async () => {
-                            const ok = await connectAndLoad(network, privateKey.trim() || undefined);
-                            if (ok && privateKey.trim()) setWalletOpen(false);
-                          })();
-                        }}
-                        disabled={busy || !privateKey.trim()}
-                      >
-                        {busy ? (
-                          <>
-                            <SpinnerIcon /> Connecting...
-                          </>
-                        ) : (
-                          "Connect with key"
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                {!injectedAvailable && (
+                  <a className="repo-link" href="https://metamask.io/download" target="_blank" rel="noreferrer">
+                    Get MetaMask
+                  </a>
                 )}
               </>
             )}
@@ -1018,7 +971,7 @@ export default function App() {
             <div className="muted" style={{ marginTop: 12 }}>
               {!signedIn &&
                 (connected
-                  ? "Just browsing — connect a wallet to place bets."
+                  ? "Browsing live windows — connect to parlay, run, or claim."
                   : busy
                     ? "Loading markets..."
                     : "You can look around for free.")}
@@ -1272,7 +1225,7 @@ export default function App() {
 
       {tab === "markets" && (
         <section className="card markets-full">
-          <h2>Will it go up or down?</h2>
+          <h2>Live windows</h2>
           {!busy && !connected && <p className="muted">Couldn't load windows. Try refreshing.</p>}
           {busy && markets.length === 0 && (
             <div className="market-list">
