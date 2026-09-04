@@ -479,7 +479,7 @@ export default function App() {
 
   async function connectAndLoad(net: NetworkName): Promise<boolean> {
     setBusy(true);
-    setMessage(null);
+    setMessage({ kind: "ok", text: "Loading markets…" });
     try {
       await connectExchange({ network: net });
       setConnected(true);

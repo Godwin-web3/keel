@@ -8,17 +8,33 @@ export type SessionConfig = {
   privateKey?: string;
 };
 
-async function withRetry<T>(fn: () => Promise<T>, times = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, times = 2): Promise<T> {
   let last: unknown;
   for (let i = 0; i < times; i++) {
     try {
       return await fn();
     } catch (err) {
       last = err;
-      await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
   }
   throw last;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
 
 type PortfolioMarketShape = {
@@ -170,9 +186,7 @@ async function resolveNetworkConfig(network: NetworkName) {
   const chain = (isTest ? chainMod?.somniaShannon ?? sdk.somniaShannon : chainMod?.somniaMainnet ?? sdk.somniaMainnet) ?? undefined;
   const addresses = isTest ? sdk.SOMNIA_TESTNET_ADDRESSES : sdk.SOMNIA_MAINNET_ADDRESSES;
   const indexerUrl = isTest ? "https://dev.smk.somnia.host/v1/graphql" : "https://prd.smk.somnia.host/v1/graphql";
-  const wsRpcUrl = isTest
-    ? "wss://api.infra.testnet.somnia.network/ws"
-    : "wss://api.infra.mainnet.somnia.network/ws";
+  const wsRpcUrl = isTest ? "wss://dream-rpc.somnia.network/ws" : "wss://api.infra.mainnet.somnia.network/ws";
 
   return { sdk, chain, addresses, indexerUrl, wsRpcUrl };
 }
@@ -199,7 +213,11 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
 
   exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
   lastConfig = fingerprint;
-  await withRetry(() => exchange.loadMarkets(true));
+  try {
+    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+  } catch {
+    /* indexer can still list windows if the chain socket is slow */
+  }
   void startLiveFeeds();
 }
 
@@ -327,7 +345,11 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
   }) as unknown as Exchange;
   lastConfig = `${network}:injected:${address.toLowerCase()}`;
   accountAddress = address;
-  await withRetry(() => exchange.loadMarkets(true));
+  try {
+    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+  } catch {
+    /* still list from indexer */
+  }
   void startLiveFeeds();
   return address;
 }
@@ -602,7 +624,11 @@ export async function listWindows(): Promise<WindowMarket[]> {
   const now = Date.now() / 1000;
 
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
-    const live = await withRetry(() => exchange.client.listLiveBinaryMarkets!({ limit: 50 }));
+    const live = await withTimeout(
+      withRetry(() => exchange.client.listLiveBinaryMarkets!({ limit: 50 })),
+      12000,
+      "Market list",
+    );
     const mapped = await Promise.all(
       live.map(async (m) => {
         const marketId = String(m.marketId || m.id || "");
@@ -613,7 +639,11 @@ export async function listWindows(): Promise<WindowMarket[]> {
         let isVoided: boolean | undefined;
         let winningOutcome: number | null | undefined;
         try {
-          const onchain = await exchange!.client.getMarketOnchain(marketId as `0x${string}`);
+          const onchain = await withTimeout(
+            exchange!.client.getMarketOnchain(marketId as `0x${string}`),
+            4000,
+            "onchain",
+          );
           statusCode = Number(onchain.status);
           status = statusFromCode(statusCode);
           isResolved = onchain.isResolved;
@@ -728,7 +758,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
 async function safeBook(symbol: string): Promise<{ bid: number | null; ask: number | null; mid: number | null }> {
   if (!exchange || !symbol) return { bid: null, ask: null, mid: null };
   try {
-    const book = await exchange.fetchOrderBook(symbol, 5);
+    const book = await withTimeout(exchange.fetchOrderBook(symbol, 5), 3500, "book");
     return pickImplied(book);
   } catch {
     return { bid: null, ask: null, mid: null };
