@@ -8,6 +8,19 @@ export type SessionConfig = {
   privateKey?: string;
 };
 
+async function withRetry<T>(fn: () => Promise<T>, times = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < times; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 type PortfolioMarketShape = {
   id: string;
   marketAddress: string;
@@ -186,7 +199,7 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
 
   exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
   lastConfig = fingerprint;
-  await exchange.loadMarkets(true);
+  await withRetry(() => exchange.loadMarkets(true));
   void startLiveFeeds();
 }
 
@@ -217,6 +230,9 @@ function getInjectedProvider(): InjectedProvider | null {
 
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
+    return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
+  }
   if (/not been authorized|4100|provider is not ready|unauthorized|user rejected/i.test(msg)) {
     return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. First seal deploys a contract — you need a little STT for gas.";
   }
@@ -320,7 +336,7 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
   }) as unknown as Exchange;
   lastConfig = `${network}:injected:${address.toLowerCase()}`;
   accountAddress = address;
-  await exchange.loadMarkets(true);
+  await withRetry(() => exchange.loadMarkets(true));
   void startLiveFeeds();
   return address;
 }
@@ -595,7 +611,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
   const now = Date.now() / 1000;
 
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
-    const live = await exchange.client.listLiveBinaryMarkets({ limit: 50 });
+    const live = await withRetry(() => exchange.client.listLiveBinaryMarkets!({ limit: 50 }));
     const mapped = await Promise.all(
       live.map(async (m) => {
         const marketId = String(m.marketId || m.id || "");

@@ -494,7 +494,7 @@ export default function App() {
       setConnected(false);
       setMessage({
         kind: "error",
-        text: err instanceof Error ? err.message : String(err),
+        text: friendlyWalletError(err),
       });
       return false;
     } finally {
@@ -1356,7 +1356,14 @@ export default function App() {
               ))}
             </div>
           </div>
-          {!busy && !connected && <p className="muted">Couldn't load markets. Try refresh.</p>}
+          {!busy && !connected && (
+            <p className="muted">
+              Couldn't load markets.{" "}
+              <button className="ghost" onClick={() => void connectAndLoad(network)}>
+                Retry
+              </button>
+            </p>
+          )}
           {busy && markets.length === 0 && (
             <div className="pm-grid">
               {[0, 1, 2, 3].map((i) => (
