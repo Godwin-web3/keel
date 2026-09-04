@@ -248,6 +248,9 @@ function getInjectedProvider(): InjectedProvider | null {
 
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted/i.test(msg)) {
+    return "The wallet signed. Keel didn't get the receipt back. Check Bets — if the position is there, you're in. If not, refresh and place again.";
+  }
   if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
   }

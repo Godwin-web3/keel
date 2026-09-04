@@ -7,4 +7,13 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  build: {
+    target: "es2020",
+    modulePreload: true,
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true,
+      },
+    },
+  },
 });
