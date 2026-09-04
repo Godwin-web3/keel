@@ -247,28 +247,15 @@ export async function prepareProviderForWrite(network: NetworkName): Promise<voi
   await provider.request({ method: "eth_requestAccounts" });
   const hexId = `0x${Number(chain.id).toString(16)}`;
   try {
+    const current = await provider.request({ method: "eth_chainId" });
+    if (String(current).toLowerCase() === hexId.toLowerCase()) return;
+  } catch {
+    /* keep going and try a switch */
+  }
+  try {
     await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId }] });
-  } catch (err: any) {
-    const notAdded = err?.code === 4902 || /unrecognized|has not been added|does not exist/i.test(String(err?.message ?? ""));
-    if (!notAdded) throw err;
-    const rpc =
-      (chain as any).rpcUrls?.default?.http?.[0] ??
-      (network === "shannon" ? "https://api.infra.testnet.somnia.network/" : "https://api.infra.mainnet.somnia.network/");
-    await provider.request({
-      method: "wallet_addEthereumChain",
-      params: [
-        {
-          chainId: hexId,
-          chainName: network === "shannon" ? "Somnia Shannon" : "Somnia",
-          nativeCurrency: { name: network === "shannon" ? "STT" : "SOMI", symbol: network === "shannon" ? "STT" : "SOMI", decimals: 18 },
-          rpcUrls: [rpc],
-          blockExplorerUrls: [
-            network === "shannon" ? "https://shannon-explorer.somnia.network" : "https://explorer.somnia.network",
-          ],
-        },
-      ],
-    });
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId }] });
+  } catch {
+    /* OKX often errors on switch even when already on Shannon — don't block the send */
   }
 }
 
@@ -325,7 +312,11 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
     transport: custom(provider),
   });
 
-  await ensureWalletOnChain(walletClient, chain as any);
+  try {
+    await ensureWalletOnChain(walletClient, chain as any);
+  } catch {
+    /* already on Shannon, or OKX can't switch — still try to trade */
+  }
 
   exchange = new sdk.SomniaMarkets({
     indexerUrl,

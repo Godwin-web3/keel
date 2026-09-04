@@ -39,7 +39,6 @@ import {
   fetchSpotPrice,
   friendlyWalletError,
   getAccountAddress,
-  getAuthorizedInjectedAddress,
   getMarketProbabilityHistory,
   getRecentLeaderboard,
   hasInjectedWallet,
@@ -125,7 +124,7 @@ export default function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingBet, setPendingBet] = useState<PendingBet>(null);
   const [parlayOn, setParlayOn] = useState(false);
-  const [sealOn, setSealOn] = useState(true);
+  const [sealOn, setSealOn] = useState(false);
   const [seals, setSeals] = useState<LocalSeal[]>([]);
   const [parlaySideB, setParlaySideB] = useState<Side>("down");
   const [run, setRun] = useState<RunState | null>(null);
@@ -528,16 +527,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (connected || busy) return;
-    void (async () => {
-      const authorized = await getAuthorizedInjectedAddress();
-      if (authorized) {
-        const ok = await connectInjected();
-        if (!ok) await connectAndLoad(network);
-      } else {
-        await connectAndLoad(network);
-      }
-    })();
+    void connectAndLoad(network);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -620,6 +610,12 @@ export default function App() {
         text: `Sealed. The book cannot see ${side === "up" ? "Up" : "Down"} until you unseal.`,
       });
     } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      if (/4100|not been authorized|provider is not ready|unauthorized/i.test(raw)) {
+        setMessage({ kind: "ok", text: "OKX couldn't seal. Placing the bet in the open." });
+        await onTrade(side);
+        return;
+      }
       setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
