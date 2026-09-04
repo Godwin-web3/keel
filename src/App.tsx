@@ -37,6 +37,7 @@ import {
   discoverOnchainPositions,
   fetchBook,
   fetchSpotPrice,
+  friendlyWalletError,
   getAccountAddress,
   getAuthorizedInjectedAddress,
   getMarketProbabilityHistory,
@@ -519,7 +520,7 @@ export default function App() {
       });
       return true;
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
       return false;
     } finally {
       setBusy(false);
@@ -588,7 +589,7 @@ export default function App() {
       setMessage({ kind: "ok", text: `Bet placed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
       return { hash: result.hash, quote: q };
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
       return null;
     } finally {
       setBusy(false);
@@ -619,7 +620,7 @@ export default function App() {
         text: `Sealed. The book cannot see ${side === "up" ? "Up" : "Down"} until you unseal.`,
       });
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
     }
@@ -656,7 +657,7 @@ export default function App() {
       });
     } catch (err) {
       setSeals(loadSeals(network));
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
     }
@@ -680,7 +681,7 @@ export default function App() {
       setJournal(loadJournal());
       setMessage({ kind: "ok", text: "Returned. The side was never shown." });
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
     }
@@ -736,7 +737,7 @@ export default function App() {
             : `Parlay partial: ${failed.map((f) => f.error).join(" · ")}`,
       });
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
     }
@@ -894,7 +895,7 @@ export default function App() {
         text: `${auto ? "Auto-claimed" : "Claimed"}${result.hash ? ` · ${shorten(result.hash)}` : ""}.`,
       });
     } catch (err) {
-      setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
     } finally {
       setBusy(false);
     }

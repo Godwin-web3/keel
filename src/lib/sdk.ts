@@ -202,14 +202,58 @@ type InjectedProvider = {
 
 function getInjectedProvider(): InjectedProvider | null {
   if (typeof window === "undefined") return null;
-  const eth = (window as any).ethereum as InjectedProvider | undefined;
+  const w = window as any;
+  const okx = w.okxwallet as InjectedProvider | undefined;
+  if (okx?.request) return okx;
+  const eth = w.ethereum as InjectedProvider | undefined;
   if (!eth) return null;
-  // Multiple extensions (MetaMask + Rabby + Coinbase, say) stack under
-  // window.ethereum.providers rather than each claiming window.ethereum alone.
   if (Array.isArray(eth.providers) && eth.providers.length > 0) {
+    const okxInList = eth.providers.find((p: any) => p.isOkxWallet || p.isOKExWallet);
+    if (okxInList) return okxInList;
     return eth.providers.find((p) => p.isMetaMask) ?? eth.providers[0];
   }
   return eth;
+}
+
+export function friendlyWalletError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/not been authorized|4100|provider is not ready|unauthorized|user rejected/i.test(msg)) {
+    return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. First seal deploys a contract — you need a little STT for gas.";
+  }
+  return msg;
+}
+
+export async function prepareProviderForWrite(network: NetworkName): Promise<void> {
+  const provider = getInjectedProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const { chain } = await resolveNetworkConfig(network);
+  if (!chain) throw new Error("Somnia chain not found.");
+  await provider.request({ method: "eth_requestAccounts" });
+  const hexId = `0x${Number(chain.id).toString(16)}`;
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId }] });
+  } catch (err: any) {
+    const notAdded = err?.code === 4902 || /unrecognized|has not been added|does not exist/i.test(String(err?.message ?? ""));
+    if (!notAdded) throw err;
+    const rpc =
+      (chain as any).rpcUrls?.default?.http?.[0] ??
+      (network === "shannon" ? "https://api.infra.testnet.somnia.network/" : "https://api.infra.mainnet.somnia.network/");
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: hexId,
+          chainName: network === "shannon" ? "Somnia Shannon" : "Somnia",
+          nativeCurrency: { name: network === "shannon" ? "STT" : "SOMI", symbol: network === "shannon" ? "STT" : "SOMI", decimals: 18 },
+          rpcUrls: [rpc],
+          blockExplorerUrls: [
+            network === "shannon" ? "https://shannon-explorer.somnia.network" : "https://explorer.somnia.network",
+          ],
+        },
+      ],
+    });
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId }] });
+  }
 }
 
 export function hasInjectedWallet(): boolean {
@@ -296,6 +340,7 @@ export async function getTradeContext(network: NetworkName) {
   if (!address) throw new Error("Connect a wallet first.");
   const { chain, addresses } = await resolveNetworkConfig(network);
   if (!chain) throw new Error("Somnia chain not found.");
+  await prepareProviderForWrite(network);
   const collateral = (addresses.collateral ?? addresses.testUsdc) as `0x${string}` | undefined;
   if (!collateral) throw new Error("No collateral token on this network.");
   const walletClient = createWalletClient({
