@@ -45,13 +45,14 @@ export default function Landing({
       </nav>
 
       <header className="land-hero">
-        <h1>The book can't see your side.</h1>
+        <h1>Commit first.<br/>Reveal later.</h1>
         <p>
-          Seal the bet first. Up or Down stays a hash until you unseal it onto DreamDEX. Then you get paid in USDso when
-          the round ends.
+          A cryptographic commit–reveal layer for Somnia Event Contracts.
+          Keel lets an intent be committed on-chain without immediately exposing its outcome.
         </p>
         <div className="hero-actions">
-          <button onClick={() => onLaunch()}>Seal a bet</button>
+          <button onClick={() => onLaunch()}>Launch app</button>
+          <button className="ghost" onClick={() => window.open('https://github.com/Godwin-web3/keel', '_blank')}>View source</button>
         </div>
       </header>
 
@@ -85,18 +86,33 @@ export default function Landing({
 
       <ul className="land-points">
         <li>
-          <strong>Seal first.</strong>
-          <span>Lock the money with a hash. Nobody sees Up or Down until you unseal.</span>
+          <strong>1. Commit</strong>
+          <span>A commitment binding the market, side, amount, and a salt is secured on-chain. The specific outcome is kept opaque.</span>
         </li>
         <li>
-          <strong>Then it hits DreamDEX.</strong>
-          <span>Unseal places the real Event Contract. Miss the time and the money comes back.</span>
+          <strong>2. Verify & Hold</strong>
+          <span>KeelSeal escrows the collateral. The network enforces authorization, valid deadlines, and replay resistance.</span>
         </li>
         <li>
-          <strong>Paid when it ends.</strong>
-          <span>Winnings don't show up by themselves. Keel collects them for you.</span>
+          <strong>3. Reveal</strong>
+          <span>The user unseals the original parameters. Keel verifies the commitment hash on-chain before passing execution to DreamDEX. If the deadline passes without a reveal, funds can be cleanly refunded.</span>
         </li>
       </ul>
+
+      <div className="chapter">
+        <div className="chapter-index">ARCH</div>
+        <div>
+          <h2>Event Contracts, Composability</h2>
+          <p className="chapter-line">
+            Keel acts as an application-specific protocol layer extending DreamDEX.
+          </p>
+          <p>
+            It provides a composable boundary around Event Contract execution.
+            While DreamDEX natively handles public event lifecycle execution, KeelSeal provides an upstream escrow state machine explicitly for commit-reveal sequences.
+            Currently active on the Shannon Testnet.
+          </p>
+        </div>
+      </div>
 
       <footer className="landing-footer">
         <span>Keel</span>
