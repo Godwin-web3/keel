@@ -76,7 +76,7 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   parlay: "Parlay",
   run: "Run",
   seal: "Sealed",
-  unseal: "Unsealed",
+  reveal: "Revealed",
 };
 
 type Theme = "light" | "dark";
@@ -576,7 +576,7 @@ export default function App() {
       });
       setJournal(rows);
       if (!runId) setTab("desk");
-      setMessage({ kind: "ok", text: `Bet placed${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
+      setMessage({ kind: "ok", text: `Execution successful${result.hash ? ` · ${shorten(result.hash)}` : ""}.` });
       return { hash: result.hash, quote: q };
     } catch (err) {
       setMessage({ kind: "error", text: friendlyWalletError(err) });
@@ -601,13 +601,13 @@ export default function App() {
         side,
         stake: stake,
         hash: row.commitHash,
-        note: `Sealed ${selected.asset}. Side is hidden on-chain until you unseal.`,
+        note: `Sealed ${selected.asset}. Side is hidden on-chain until you reveal.`,
       });
       setJournal(loadJournal());
       setTab("desk");
       setMessage({
         kind: "ok",
-        text: `Sealed. The book cannot see ${side === "up" ? "Up" : "Down"} until you unseal.`,
+        text: `Sealed. The outcome remains opaque ${side === "up" ? "Up" : "Down"} until you reveal.`,
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -622,7 +622,7 @@ export default function App() {
     }
   }
 
-  async function onUnseal(row: LocalSeal) {
+  async function onReveal(row: LocalSeal) {
     const market = markets.find((m) => m.marketId === row.marketId);
     setBusy(true);
     setMessage(null);
@@ -630,26 +630,26 @@ export default function App() {
       await revealSeal(network, row);
       if (!market) {
         setSeals(loadSeals(network));
-        setMessage({ kind: "ok", text: "Unsealed. Place the bet when the window is open." });
+        setMessage({ kind: "ok", text: "Revealed. Execute when the window is open." });
         return;
       }
       const placed = await placeStake({ market, side: row.side, stake: row.amount });
       markSealPlaced(network, row.id, placed.hash);
       setSeals(loadSeals(network));
       appendJournal({
-        kind: "unseal",
+        kind: "reveal",
         marketId: row.marketId,
         symbol: row.symbol,
         asset: row.asset,
         side: row.side,
         stake: row.amount,
         hash: placed.hash,
-        note: "Unsealed and placed on DreamDEX.",
+        note: "Revealed and placed on DreamDEX.",
       });
       setJournal(loadJournal());
       setMessage({
         kind: "ok",
-        text: `Unsealed and placed${placed.hash ? ` · ${shorten(placed.hash)}` : ""}.`,
+        text: `Revealed and placed${placed.hash ? ` · ${shorten(placed.hash)}` : ""}.`,
       });
     } catch (err) {
       setSeals(loadSeals(network));
@@ -672,7 +672,7 @@ export default function App() {
         asset: row.asset,
         side: row.side,
         stake: row.amount,
-        note: "Missed the unseal window. Money returned.",
+        note: "Missed the reveal window. Money returned.",
       });
       setJournal(loadJournal());
       setMessage({ kind: "ok", text: "Returned. The side was never shown." });
@@ -849,7 +849,7 @@ export default function App() {
       const result = await redeemMarket(marketId, side);
       const note =
         result.result === "void"
-          ? "Window cancelled - your bet was returned"
+          ? "Window cancelled - your commitment was refunded"
           : result.result === "win"
             ? "You won - claimed"
             : result.result === "loss"
@@ -1058,7 +1058,7 @@ export default function App() {
             <div className="muted" style={{ marginTop: 12 }}>
               {!signedIn &&
                 (connected
-                  ? "Looking around — connect a wallet to bet."
+                  ? "Looking around — connect a wallet to commit."
                   : busy
                     ? "Loading markets..."
                     : "You can look around without a wallet.")}
@@ -1071,7 +1071,7 @@ export default function App() {
         <div className="confirm-backdrop" onClick={closeBetSheet}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
-              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm both bets" : "Confirm") : "Place a bet"}</h2>
+              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm both commitments" : "Confirm") : "Commit"}</h2>
               <button className="ghost" onClick={closeBetSheet}>
                 Close
               </button>
@@ -1107,7 +1107,7 @@ export default function App() {
                     }}
                     disabled={!canSeal(selected) && !sealOn}
                   />
-                  Seal this bet. The book cannot see Up or Down until you unseal.
+                  Commit this intent. The outcome remains opaque Up or Down until you reveal.
                 </label>
                 {parlayOn && parlayPartner && (
                   <div className="parlay-sides">
@@ -1196,7 +1196,7 @@ export default function App() {
                     : !signedIn
                       ? "Connect your wallet to place this."
                       : sealOn
-                        ? "Seal it first. Nobody sees your side until you unseal."
+                        ? "Seal it first. The outcome is opaque until you reveal."
                         : "You only lose what you put in."}
                 </p>
               </>
@@ -1275,7 +1275,7 @@ export default function App() {
                       void onParlay(a, b);
                     }}
                   >
-                    Confirm both bets
+                    Confirm both commitments
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
@@ -1430,12 +1430,12 @@ export default function App() {
       {tab === "desk" && (
         <div className="grid tab-enter">
           <section className="card">
-            <h2>Your bets</h2>
+            <h2>Your positions</h2>
             {seals.some((s) => s.status === "sealed") && (
               <>
                 <h3 className="muted">Sealed</h3>
                 <p className="muted" style={{ marginTop: -6, marginBottom: 10 }}>
-                  Hidden on-chain. Unseal to place it on DreamDEX. Miss the time and the money comes back.
+                  Hidden on-chain. Reveal to place it on DreamDEX. Miss the time and the money comes back.
                 </p>
                 {seals
                   .filter((s) => s.status === "sealed")
@@ -1457,15 +1457,15 @@ export default function App() {
                               Get money back
                             </button>
                           ) : (
-                            <button disabled={busy || !signedIn} onClick={() => void onUnseal(s)}>
-                              Unseal
+                            <button disabled={busy || !signedIn} onClick={() => void onReveal(s)}>
+                              Reveal
                             </button>
                           )}
                         </div>
                         <div className="muted">
                           {late
-                            ? "Time to unseal has passed. The side was never shown."
-                            : `Unseal in the next ${Math.max(0, Math.floor(left / 60))}m ${String(Math.max(0, Math.floor(left % 60))).padStart(2, "0")}s`}
+                            ? "Time to reveal has passed. The side was never shown."
+                            : `Reveal in the next ${Math.max(0, Math.floor(left / 60))}m ${String(Math.max(0, Math.floor(left % 60))).padStart(2, "0")}s`}
                         </div>
                       </div>
                     );
@@ -1479,7 +1479,7 @@ export default function App() {
                 onChange={(e) => setAutoClaim(e.target.checked)}
                 disabled={!signedIn}
               />
-              Pay me automatically when a bet settles.
+              Pay me automatically when a position settles.
             </label>
             <div className="actions" style={{ marginBottom: 14 }}>
               <button
@@ -1497,7 +1497,7 @@ export default function App() {
               </button>
             </div>
             <h3 className="muted">Open</h3>
-            {open.length === 0 && <p className="muted">No open bets.</p>}
+            {open.length === 0 && <p className="muted">No open positions.</p>}
             {open.map((p) => (
               <div key={p.marketId + p.side} className="market">
                 <div className="market-top">
