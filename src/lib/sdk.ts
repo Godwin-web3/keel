@@ -788,6 +788,9 @@ export async function placeStake(args: {
   // Ensure markets are loaded before order creation to avoid "unknown symbol" from SDK
   await exchange.loadMarkets(false).catch(() => {});
 
+  // Ensure markets are loaded before order creation to avoid "unknown symbol" from SDK
+  await exchange.loadMarkets(false).catch(() => {});
+
   const implied = args.market.impliedUp ?? 0.5;
   const entry = args.side === "up" ? implied : 1 - implied;
   const price = Math.min(0.99, Math.max(0.01, entry));
@@ -797,6 +800,8 @@ export async function placeStake(args: {
   // selling Up requires inventory and is the wrong fill path for a new stake.
   const symbol = outcomeSymbol(args.market, args.side);
 
+  // Also load markets when reading the book, as it might also hit SDK issues
+  await exchange.loadMarkets(false).catch(() => {});
   // Also load markets when reading the book, as it might also hit SDK issues
   await exchange.loadMarkets(false).catch(() => {});
   const book = await safeBook(symbol);
