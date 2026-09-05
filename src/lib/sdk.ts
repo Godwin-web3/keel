@@ -796,8 +796,6 @@ export async function placeStake(args: {
   // Always BUY the outcome token. Down is #NO, not a sell on the Up book —
   // selling Up requires inventory and is the wrong fill path for a new stake.
   const symbol = outcomeSymbol(args.market, args.side);
-  // Also load markets when reading the book, as it might also hit SDK issues
-  await exchange.loadMarkets(false).catch(() => {});
   const book = await safeBook(symbol);
   const limit = Math.min(0.99, Math.max(0.01, (book.ask ?? price) + 0.02));
 

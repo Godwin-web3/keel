@@ -75,7 +75,7 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
   note: "Note",
   parlay: "Parlay",
   run: "Run",
-  seal: "Sealed",
+  commit: "Committed",
   reveal: "Revealed",
 };
 
@@ -594,7 +594,7 @@ export default function App() {
       const row = await commitSeal({ network, market: selected, side, amount: stake });
       setSeals(loadSeals(network));
       appendJournal({
-        kind: "seal",
+        kind: "commit",
         marketId: selected.marketId,
         symbol: selected.symbol,
         asset: selected.asset,
@@ -666,7 +666,7 @@ export default function App() {
       await refundSeal(network, row);
       setSeals(loadSeals(network));
       appendJournal({
-        kind: "seal",
+        kind: "commit",
         marketId: row.marketId,
         symbol: row.symbol,
         asset: row.asset,
