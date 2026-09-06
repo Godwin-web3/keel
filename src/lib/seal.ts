@@ -114,9 +114,18 @@ export function commitmentHash(args: {
   );
 }
 
+/** Seconds before `revealBy` when the client may auto-reveal + place. */
+export const AUTO_REVEAL_WINDOW_SEC = 45;
+
 export function sealDeadline(market: WindowMarket, nowSec = Math.floor(Date.now() / 1000)): number {
   const expiry = market.expirySec || nowSec + 600;
   return Math.max(nowSec + 45, expiry - 30);
+}
+
+/** True when a sealed ticket is inside the auto-reveal window (not yet past deadline). */
+export function inAutoRevealWindow(revealBy: number, nowSec = Math.floor(Date.now() / 1000)): boolean {
+  const left = revealBy - nowSec;
+  return left > 0 && left <= AUTO_REVEAL_WINDOW_SEC;
 }
 
 export function canSeal(market: WindowMarket, nowSec = Math.floor(Date.now() / 1000)): boolean {

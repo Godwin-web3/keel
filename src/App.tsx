@@ -54,7 +54,7 @@ import {
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
-import { canSeal, commitSeal, getSealAddress, KEEL_SEAL_ADDRESSES, loadSeals, markSealPlaced, refundSeal, revealSeal, type LocalSeal } from "./lib/seal";
+import { AUTO_REVEAL_WINDOW_SEC, canSeal, commitSeal, getSealAddress, inAutoRevealWindow, KEEL_SEAL_ADDRESSES, loadSeals, markSealPlaced, refundSeal, revealSeal, type LocalSeal } from "./lib/seal";
 import PriceChart from "./PriceChart";
 import Landing from "./Landing";
 import RunCard from "./RunCard";
@@ -82,6 +82,7 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
 type Theme = "light" | "dark";
 const THEME_KEY = "keel.theme";
 const SEAL_PRIMER_KEY = "keel.sealPrimer.dismissed.v1";
+const AUTO_REVEAL_KEY = "keel.autoReveal.v1";
 const SHANNON_EXPLORER = "https://shannon-explorer.somnia.network";
 
 function sealExplorerUrl(addr: string): string {
@@ -91,6 +92,18 @@ function sealExplorerUrl(addr: string): string {
 function readSealPrimerOpen(): boolean {
   try {
     return localStorage.getItem(SEAL_PRIMER_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+/** Default ON — advanced users can turn off via Positions. */
+function readAutoReveal(): boolean {
+  try {
+    const v = localStorage.getItem(AUTO_REVEAL_KEY);
+    if (v === "0") return false;
+    if (v === "1") return true;
+    return true;
   } catch {
     return true;
   }
@@ -137,6 +150,7 @@ export default function App() {
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [journal, setJournal] = useState<JournalRow[]>([]);
   const [autoClaim, setAutoClaim] = useState(true);
+  const [autoReveal, setAutoReveal] = useState(readAutoReveal);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingBet, setPendingBet] = useState<PendingBet>(null);
   const [parlayOn, setParlayOn] = useState(false);
@@ -163,14 +177,18 @@ export default function App() {
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const refreshingRef = useRef(false);
   const autoClaimingRef = useRef<Set<string>>(new Set());
+  const autoRevealingRef = useRef<Set<string>>(new Set());
+  const busyRef = useRef(false);
   const runRef = useRef<RunState | null>(null);
   runRef.current = run;
+  busyRef.current = busy;
   const restakingRef = useRef(false);
 
   useEffect(() => {
     setJournal(loadJournal());
     setRun(loadRun());
     setSeals(loadSeals(network));
+    autoRevealingRef.current.clear();
   }, [network]);
 
   useEffect(() => {
@@ -791,15 +809,21 @@ export default function App() {
     }
   }
 
-  async function onReveal(row: LocalSeal) {
+  async function onReveal(row: LocalSeal, opts?: { auto?: boolean }) {
     const market = markets.find((m) => m.marketId === row.marketId);
+    const auto = Boolean(opts?.auto);
     setBusy(true);
     setMessage(null);
     try {
       await revealSeal(network, row);
       if (!market) {
         setSeals(loadSeals(network));
-        setMessage({ kind: "ok", text: "Revealed. Execute when the window is open." });
+        setMessage({
+          kind: "ok",
+          text: auto
+            ? "Auto-revealed. Execute when the window is open."
+            : "Revealed. Execute when the window is open.",
+        });
         return;
       }
       const placed = await placeStake({ market, side: row.side, stake: row.amount });
@@ -813,12 +837,12 @@ export default function App() {
         side: row.side,
         stake: row.amount,
         hash: placed.hash,
-        note: "Revealed and placed on DreamDEX.",
+        note: auto ? "Auto-revealed near deadline and placed on DreamDEX." : "Revealed and placed on DreamDEX.",
       });
       setJournal(loadJournal());
       setMessage({
         kind: "ok",
-        text: `Revealed and placed${placed.hash ? ` · ${shorten(placed.hash)}` : ""}.`,
+        text: `${auto ? "Auto-revealed" : "Revealed"} and placed${placed.hash ? ` · ${shorten(placed.hash)}` : ""}.`,
       });
     } catch (err) {
       setSeals(loadSeals(network));
@@ -1155,6 +1179,33 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimable, autoClaim, signedIn]);
 
+  // Auto-reveal: as the reveal deadline approaches, reveal + place once so a
+  // user who sealed and walked away still lands a DreamDEX trade. Manual
+  // Reveal / Refund stay available; past revealBy we never auto-reveal.
+  useEffect(() => {
+    if (!autoReveal || !signedIn) return;
+    if (busyRef.current) return;
+    const nowSec = nowMs / 1000;
+    for (const row of seals) {
+      if (row.status !== "sealed") continue;
+      if (autoRevealingRef.current.has(row.id)) continue;
+      if (!inAutoRevealWindow(row.revealBy, nowSec)) continue;
+      autoRevealingRef.current.add(row.id);
+      void onReveal(row, { auto: true });
+      break; // one at a time — busy guards the rest until the next tick
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seals, nowMs, autoReveal, signedIn, network, markets]);
+
+  function setAutoRevealPref(next: boolean) {
+    setAutoReveal(next);
+    try {
+      localStorage.setItem(AUTO_REVEAL_KEY, next ? "1" : "0");
+    } catch {
+      /* private browsing — session-only */
+    }
+  }
+
   function shareWin(row: JournalRow) {
     const asset = row.asset ?? detectAsset(row.symbol || row.marketId);
     const sideWord = row.side === "up" ? "Up" : row.side === "down" ? "Down" : "";
@@ -1412,8 +1463,9 @@ export default function App() {
                       <div className="seal-story">
                         <p className="seal-story-kicker">Sealed by default</p>
                         <p>
-                          Side stays hidden on-chain until you Reveal on Positions. Miss the deadline and
-                          the stake refunds — the outcome was never shown.
+                          Side stays hidden on-chain until you Reveal on Positions. If you leave, Keel
+                          auto-reveals in the last seconds before the deadline so the trade still goes
+                          through. Refund anytime before that to cancel.
                         </p>
                       </div>
                     )}
@@ -1576,8 +1628,9 @@ export default function App() {
                 {sealOn && (
                   <div className="seal-story seal-story--compact">
                     <p>
-                      Commit now — side hidden until Reveal. After reveal, Keel places on DreamDEX. Miss
-                      the window → refund.
+                      Commit now — side hidden until Reveal. After reveal, Keel places on DreamDEX. If
+                      you leave, Keel auto-reveals in the last seconds before the deadline so the trade
+                      still goes through. Refund anytime before that to cancel.
                     </p>
                   </div>
                 )}
@@ -1668,7 +1721,8 @@ export default function App() {
                     <p className="seal-story-kicker">Sealed double</p>
                     <p>
                       Stake splits half/half like a parlay. Each leg is its own seal — reveal and place
-                      them separately on Positions. Miss a reveal → that leg refunds.
+                      them separately on Positions. If you leave, Keel auto-reveals each leg in the last
+                      seconds before its deadline. Refund anytime before that to cancel.
                     </p>
                   </div>
                 )}
@@ -1794,10 +1848,13 @@ export default function App() {
                     <strong>Hold</strong> — KeelSeal escrows until you reveal or the deadline passes.
                   </li>
                   <li>
-                    <strong>Reveal</strong> — unseal, then place on DreamDEX from Positions.
+                    <strong>Reveal</strong> — unseal, then place on DreamDEX from Positions. If you
+                    leave, Keel auto-reveals in the last seconds before the deadline so the trade still
+                    goes through.
                   </li>
                   <li>
-                    <strong>Claim</strong> — miss the window → refund; winners redeem after settlement.
+                    <strong>Claim</strong> — refund anytime before the deadline to cancel; winners redeem
+                    after settlement.
                   </li>
                 </ol>
               </div>
@@ -1927,8 +1984,9 @@ export default function App() {
           <section className="card desk-card">
             <h2>Positions</h2>
             <p className="desk-lede">
-              Sealed tickets first — reveal to place on DreamDEX, or refund if you miss the window. Open
-              fills and claims sit below.
+              Sealed tickets first — reveal to place on DreamDEX. If you leave, Keel auto-reveals in the
+              last seconds before the deadline so the trade still goes through. Refund anytime before
+              that to cancel. Open fills and claims sit below.
             </p>
             <div className="desk-section desk-section--sealed">
               <div className="desk-section-head">
@@ -1938,7 +1996,8 @@ export default function App() {
                 )}
               </div>
               <p className="desk-section-note">
-                Hidden on-chain until you reveal. Reveal places on DreamDEX. Miss the deadline → refund.
+                Hidden on-chain until you reveal. Reveal places on DreamDEX. Auto-reveal fires in the last{" "}
+                {AUTO_REVEAL_WINDOW_SEC}s if you leave — refund anytime before that to cancel.
               </p>
               {!seals.some((s) => s.status === "sealed") ? (
                 <p className="desk-empty desk-empty--teach">
@@ -1977,7 +2036,9 @@ export default function App() {
                         <div className={`seal-countdown ${late ? "late" : ""}`}>
                           {late
                             ? "Reveal window closed — side was never shown. Claim your refund."
-                            : `Reveal within ${mins}m ${String(secs).padStart(2, "0")}s or refund.`}
+                            : inAutoRevealWindow(s.revealBy, nowMs / 1000) && autoReveal
+                              ? `Auto-reveal in ${mins}m ${String(secs).padStart(2, "0")}s — or Reveal now / Refund to cancel.`
+                              : `Reveal within ${mins}m ${String(secs).padStart(2, "0")}s or refund.`}
                         </div>
                       </div>
                     );
@@ -1985,15 +2046,26 @@ export default function App() {
               )}
             </div>
             <div className="desk-toolbar">
-              <label className="muted desk-autoclose">
-                <input
-                  type="checkbox"
-                  checked={autoClaim}
-                  onChange={(e) => setAutoClaim(e.target.checked)}
-                  disabled={!signedIn}
-                />
-                Auto-claim when a position settles
-              </label>
+              <div className="desk-prefs">
+                <label className="muted desk-autoclose">
+                  <input
+                    type="checkbox"
+                    checked={autoReveal}
+                    onChange={(e) => setAutoRevealPref(e.target.checked)}
+                    disabled={!signedIn}
+                  />
+                  Auto-reveal near deadline
+                </label>
+                <label className="muted desk-autoclose">
+                  <input
+                    type="checkbox"
+                    checked={autoClaim}
+                    onChange={(e) => setAutoClaim(e.target.checked)}
+                    disabled={!signedIn}
+                  />
+                  Auto-claim when a position settles
+                </label>
+              </div>
               <button
                 disabled={busy || claimable.length === 0 || !signedIn}
                 onClick={() => {

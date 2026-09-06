@@ -947,10 +947,20 @@ button:disabled {
   margin: 4px 0 16px;
 }
 
+.desk-prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .desk-autoclose {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+}
+
+.desk-autoclose input[type="checkbox"] {
+  accent-color: #00d4a4;
 }
 
 .sheet-error {
