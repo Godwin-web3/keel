@@ -27,12 +27,12 @@ const STEPS = [
   {
     n: "03",
     title: "Reveal",
-    body: "Unseal the parameters. Keel verifies the hash, then places the DreamDEX Event Contract order.",
+    body: "Unseal yourself, or leave and Keel auto-reveals in the last ~45s so the trade still places on DreamDEX.",
   },
   {
     n: "04",
-    title: "Claim",
-    body: "Miss the reveal window and refund cleanly. After settlement, redeem winners from Positions.",
+    title: "Refund · Claim",
+    body: "Refund anytime before auto-reveal to cancel — side never shown. After settlement, redeem winners from Positions.",
   },
 ] as const;
 
@@ -47,7 +47,7 @@ const APP_SURFACES = [
   },
   {
     title: "Positions",
-    body: "Sealed tickets, open trades, and claimable wins in one place. Reveal or refund from here.",
+    body: "Sealed tickets, open trades, and claimable wins — tap any row for detail, reveal, refund, or claim.",
   },
   {
     title: "Run",
@@ -117,9 +117,9 @@ export default function Landing({
           Reveal when you&apos;re ready.
         </h1>
         <p className="land-lede">
-          Keel is a commit–reveal layer for DreamDEX Event Contracts. Commit your stake on-chain with
-          the outcome hidden; reveal later to place — or miss the deadline and refund. Seal is the
-          default.
+          Keel is a commit–reveal layer for DreamDEX Event Contracts. Seal hides your side on-chain until
+          reveal. Leave and Keel auto-reveals in the last ~45s so the trade still executes; refund before
+          then to cancel — side never shown. Seal is the default.
         </p>
         <div className="hero-actions">
           <button type="button" onClick={() => onLaunch()}>
@@ -169,15 +169,16 @@ export default function Landing({
         </div>
         <p className="land-section-lede">
           Seal commits collateral with a cryptographic commitment. The chain sees a hash — not the
-          side. Reveal unlocks placement; miss the deadline and you get your funds back.
+          side. Reveal unlocks placement; leave and auto-reveal fires in the last ~45s. Refund before
+          then to cancel — the outcome was never shown.
         </p>
         <div className="land-product-grid">
           <article className="land-product-card land-product-card--accent">
             <p className="land-card-kicker">Default</p>
             <h3>Seal</h3>
             <p>
-              Commit → escrow → reveal → DreamDEX place. Sealed-by-default on every market that can
-              still clear before close.
+              Commit → escrow → reveal (or auto in the last ~45s) → DreamDEX place. Sealed-by-default
+              on every market that can still clear before close.
             </p>
           </article>
           <article className="land-product-card">
@@ -190,9 +191,10 @@ export default function Landing({
           </article>
           <article className="land-product-card">
             <p className="land-card-kicker">Safety</p>
-            <h3>Refund on miss</h3>
+            <h3>Refund before reveal</h3>
             <p>
-              If the reveal window passes, collateral refunds. The outcome was never shown on-chain.
+              Cancel anytime before auto-reveal and get your stake back. Side stays hidden — never
+              shown on-chain.
             </p>
           </article>
           <article className="land-product-card">
@@ -209,7 +211,7 @@ export default function Landing({
       <section className="land-section" aria-labelledby="land-how">
         <div className="land-section-head">
           <p className="land-eyebrow">How it works</p>
-          <h2 id="land-how">Four steps. Side stays dark until reveal.</h2>
+          <h2 id="land-how">Four steps. Side stays dark until reveal — or auto-reveal.</h2>
         </div>
         <ol className="land-steps">
           {STEPS.map((step) => (
@@ -329,7 +331,7 @@ export default function Landing({
 
       <section className="land-close">
         <h2>Ready to seal a window?</h2>
-        <p>Open the app, pick a live market, and commit with the side hidden until you reveal.</p>
+        <p>Open the app, pick a live market, and seal with the side hidden — reveal yourself or let auto-reveal place it.</p>
         <div className="hero-actions">
           <button type="button" onClick={() => onLaunch()}>
             Launch app

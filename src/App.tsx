@@ -65,6 +65,11 @@ import { ExternalLinkIcon, MarketsIcon, MenuIcon, MoonIcon, PositionsIcon, RunIc
 type Tab = "markets" | "run" | "desk" | "leaderboard";
 type HistoryFilter = "all" | "won" | "lost" | "collected";
 type PendingBet = { kind: "single"; side: Side } | { kind: "parlay"; a: Side; b: Side } | null;
+type DetailTarget =
+  | { type: "sealed"; seal: LocalSeal }
+  | { type: "open"; position: OpenPosition }
+  | { type: "claimable"; claimable: Claimable }
+  | { type: "activity"; row: JournalRow };
 
 const DEFAULT_STAKE = 10;
 const APP_HASH = "#/app";
@@ -87,6 +92,10 @@ const SHANNON_EXPLORER = "https://shannon-explorer.somnia.network";
 
 function sealExplorerUrl(addr: string): string {
   return `${SHANNON_EXPLORER}/address/${addr}`;
+}
+
+function txExplorerUrl(hash: string): string {
+  return `${SHANNON_EXPLORER}/tx/${hash}`;
 }
 
 function readSealPrimerOpen(): boolean {
@@ -141,6 +150,7 @@ export default function App() {
     claimable: [],
   });
   const [betOpen, setBetOpen] = useState(false);
+  const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [markets, setMarkets] = useState<WindowMarket[]>([]);
@@ -262,24 +272,25 @@ export default function App() {
 
   // Prevent background scroll while a sheet/menu is open (avoids "stuck" feel).
   useEffect(() => {
-    if (!walletOpen && !betOpen && !moreOpen) return;
+    if (!walletOpen && !betOpen && !moreOpen && !detail) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [walletOpen, betOpen, moreOpen]);
+  }, [walletOpen, betOpen, moreOpen, detail]);
 
   useEffect(() => {
-    if (!walletOpen && !betOpen) return;
+    if (!walletOpen && !betOpen && !detail) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (betOpen) closeBetSheet();
+      if (detail) setDetail(null);
+      else if (betOpen) closeBetSheet();
       else setWalletOpen(false);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [walletOpen, betOpen]);
+  }, [walletOpen, betOpen, detail]);
 
   function goTab(next: Tab) {
     setTab(next);
@@ -865,7 +876,7 @@ export default function App() {
         asset: row.asset,
         side: row.side,
         stake: row.amount,
-        note: "Missed the reveal window. Money returned.",
+        note: "Refunded. Side was never shown.",
       });
       setJournal(loadJournal());
       setMessage({ kind: "ok", text: "Returned. The side was never shown." });
@@ -1197,6 +1208,41 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seals, nowMs, autoReveal, signedIn, network, markets]);
 
+
+  function journalFor(marketId: string, side?: Side): JournalRow[] {
+    return journal.filter(
+      (r) => r.marketId === marketId && (side == null || r.side == null || r.side === side),
+    );
+  }
+
+  function openActivityDetail(row: JournalRow) {
+    const sealed = seals.find(
+      (s) =>
+        s.status === "sealed" &&
+        s.marketId === row.marketId &&
+        (row.side == null || s.side === row.side),
+    );
+    if (sealed) {
+      setDetail({ type: "sealed", seal: sealed });
+      return;
+    }
+    const openPos = open.find(
+      (p) => p.marketId === row.marketId && (row.side == null || p.side === row.side),
+    );
+    if (openPos) {
+      setDetail({ type: "open", position: openPos });
+      return;
+    }
+    const claim = claimable.find(
+      (c) => c.marketId === row.marketId && (row.side == null || c.side === row.side),
+    );
+    if (claim) {
+      setDetail({ type: "claimable", claimable: claim });
+      return;
+    }
+    setDetail({ type: "activity", row });
+  }
+
   function setAutoRevealPref(next: boolean) {
     setAutoReveal(next);
     try {
@@ -1282,7 +1328,7 @@ export default function App() {
                     <strong>What is Keel?</strong>
                     <p>
                       Commit–reveal for DreamDEX Event Contracts. Seal hides your side on-chain until
-                      you reveal — then it places. Miss the deadline and you refund.
+                      reveal. Leave and Keel auto-reveals in the last ~45s; refund before then to cancel.
                     </p>
                   </div>
                   <div className="dropdown-divider" />
@@ -1392,8 +1438,9 @@ export default function App() {
             <div className="wallet-trust">
               <p className="wallet-trust-title">Keel on {network === "shannon" ? "Shannon" : "mainnet"}</p>
               <p className="muted">
-                Seal is the default path: commit stake with the side hidden, reveal to place on DreamDEX,
-                or miss the window and refund. Practice uses tUSDC on Shannon.
+                Seal is the default path: commit stake with the side hidden, reveal to place on DreamDEX.
+                Leave and auto-reveal fires in the last ~45s; refund before then to cancel. Practice uses
+                tUSDC on Shannon.
               </p>
               {(() => {
                 const sealAddr = getSealAddress(network) ?? KEEL_SEAL_ADDRESSES.shannon;
@@ -1464,8 +1511,9 @@ export default function App() {
                         <p className="seal-story-kicker">Sealed by default</p>
                         <p>
                           Side stays hidden on-chain until you Reveal on Positions. If you leave, Keel
-                          auto-reveals in the last seconds before the deadline so the trade still goes
-                          through. Refund anytime before that to cancel.
+                          auto-reveals in the last ~{AUTO_REVEAL_WINDOW_SEC}s before the deadline so the
+                          trade still goes through. Refund anytime before that to cancel — side never
+                          shown.
                         </p>
                       </div>
                     )}
@@ -1629,8 +1677,9 @@ export default function App() {
                   <div className="seal-story seal-story--compact">
                     <p>
                       Commit now — side hidden until Reveal. After reveal, Keel places on DreamDEX. If
-                      you leave, Keel auto-reveals in the last seconds before the deadline so the trade
-                      still goes through. Refund anytime before that to cancel.
+                      you leave, Keel auto-reveals in the last ~{AUTO_REVEAL_WINDOW_SEC}s before the deadline so
+                      the trade still goes through. Refund anytime before that to cancel — side never
+                      shown.
                     </p>
                   </div>
                 )}
@@ -1722,7 +1771,8 @@ export default function App() {
                     <p>
                       Stake splits half/half like a parlay. Each leg is its own seal — reveal and place
                       them separately on Positions. If you leave, Keel auto-reveals each leg in the last
-                      seconds before its deadline. Refund anytime before that to cancel.
+                      ~{AUTO_REVEAL_WINDOW_SEC}s before its deadline. Refund anytime before that to cancel — side
+                      never shown.
                     </p>
                   </div>
                 )}
@@ -1822,7 +1872,7 @@ export default function App() {
           <div className="feed-head">
             <div className="feed-head-copy">
               <h1>Markets</h1>
-              <p className="feed-sub">Live Event Contract windows — seal hides your side until reveal.</p>
+              <p className="feed-sub">Live Event Contract windows — seal hides your side until reveal (auto in the last ~45s if you leave).</p>
             </div>
             <div className="asset-chips">
               {(["ALL", "BTC", "ETH"] as const).map((a) => (
@@ -1834,7 +1884,7 @@ export default function App() {
           </div>
           <div className="seal-default-row" aria-label="Sealed by default">
             <span className="seal-default-pill">Sealed by default</span>
-            <span className="muted seal-default-hint">Commit → Hold → Reveal → Claim · Place in the open stays advanced</span>
+            <span className="muted seal-default-hint">Commit → Hold → Reveal (or auto ~45s) → Claim · Place in the open stays advanced</span>
           </div>
           {sealPrimerOpen && (
             <aside className="seal-primer" role="note">
@@ -1849,12 +1899,12 @@ export default function App() {
                   </li>
                   <li>
                     <strong>Reveal</strong> — unseal, then place on DreamDEX from Positions. If you
-                    leave, Keel auto-reveals in the last seconds before the deadline so the trade still
-                    goes through.
+                    leave, Keel auto-reveals in the last ~{AUTO_REVEAL_WINDOW_SEC}s before the deadline so
+                    the trade still goes through.
                   </li>
                   <li>
-                    <strong>Claim</strong> — refund anytime before the deadline to cancel; winners redeem
-                    after settlement.
+                    <strong>Claim</strong> — refund anytime before auto-reveal to cancel (side never
+                    shown); winners redeem after settlement.
                   </li>
                 </ol>
               </div>
@@ -1984,9 +2034,9 @@ export default function App() {
           <section className="card desk-card">
             <h2>Positions</h2>
             <p className="desk-lede">
-              Sealed tickets first — reveal to place on DreamDEX. If you leave, Keel auto-reveals in the
-              last seconds before the deadline so the trade still goes through. Refund anytime before
-              that to cancel. Open fills and claims sit below.
+              Sealed tickets first — tap any row for detail. Reveal to place on DreamDEX. If you leave,
+              Keel auto-reveals in the last ~{AUTO_REVEAL_WINDOW_SEC}s before the deadline so the trade still goes
+              through. Refund anytime before that to cancel. Open fills and claims sit below.
             </p>
             <div className="desk-section desk-section--sealed">
               <div className="desk-section-head">
@@ -2013,7 +2063,19 @@ export default function App() {
                     const mins = Math.max(0, Math.floor(left / 60));
                     const secs = Math.max(0, Math.floor(left % 60));
                     return (
-                      <div key={s.id} className={`market seal-row ${late ? "late" : ""}`}>
+                      <div
+                        key={s.id}
+                        className={`market seal-row ${late ? "late" : ""}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setDetail({ type: "sealed", seal: s })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setDetail({ type: "sealed", seal: s });
+                          }
+                        }}
+                      >
                         <div className="market-top">
                           <strong className="market-name">
                             <span className="asset-icon">{ASSET_ICON[s.asset]}</span>
@@ -2024,11 +2086,25 @@ export default function App() {
                             </span>
                           </strong>
                           {late ? (
-                            <button className="seal-cta refund" disabled={busy || !signedIn} onClick={() => void onRefundSeal(s)}>
+                            <button
+                              className="seal-cta refund"
+                              disabled={busy || !signedIn}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onRefundSeal(s);
+                              }}
+                            >
                               Refund
                             </button>
                           ) : (
-                            <button className="seal-cta reveal" disabled={busy || !signedIn} onClick={() => void onReveal(s)}>
+                            <button
+                              className="seal-cta reveal"
+                              disabled={busy || !signedIn}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onReveal(s);
+                              }}
+                            >
                               Reveal
                             </button>
                           )}
@@ -2086,7 +2162,19 @@ export default function App() {
                 <p className="desk-empty">No open fills yet. After you reveal a seal (or place in the open), live tickets land here until settlement.</p>
               ) : (
                 open.map((p) => (
-                  <div key={p.marketId + p.side} className="market">
+                  <div
+                    key={p.marketId + p.side}
+                    className="market"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetail({ type: "open", position: p })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetail({ type: "open", position: p });
+                      }
+                    }}
+                  >
                     <div className="market-top">
                       <strong className="market-name">
                         <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
@@ -2117,7 +2205,19 @@ export default function App() {
                 <p className="desk-empty">Nothing to claim yet. Settled winners show up here — or turn on auto-claim above.</p>
               ) : (
                 claimable.map((c) => (
-                  <div key={`${c.marketId}:${c.side}`} className="market">
+                  <div
+                    key={`${c.marketId}:${c.side}`}
+                    className="market"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetail({ type: "claimable", claimable: c })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetail({ type: "claimable", claimable: c });
+                      }
+                    }}
+                  >
                     <div className="market-top">
                       <strong className="market-name">
                         <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
@@ -2125,7 +2225,10 @@ export default function App() {
                       </strong>
                       <button
                         disabled={busy || !signedIn}
-                        onClick={() => void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout);
+                        }}
                       >
                         Claim {money(c.estimatedPayout, network)}
                       </button>
@@ -2176,7 +2279,19 @@ export default function App() {
                 {filteredJournal.map((row) => {
                   const asset = row.asset ?? detectAsset(row.symbol || row.marketId);
                   return (
-                    <article key={row.id} className="activity-row">
+                    <article
+                      key={row.id}
+                      className="activity-row activity-row--clickable"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openActivityDetail(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openActivityDetail(row);
+                        }
+                      }}
+                    >
                       <div className="activity-row-top">
                         <span className="activity-kind">{KIND_LABEL[row.kind] ?? row.kind}</span>
                         <time className="activity-when">{new Date(row.at).toLocaleString()}</time>
@@ -2193,7 +2308,13 @@ export default function App() {
                       <div className="activity-row-detail muted">
                         {row.hash ? shorten(row.hash) : row.note || row.result || ""}
                         {row.kind === "redeem" && row.result === "win" && (
-                          <button className="share-btn" onClick={() => shareWin(row)}>
+                          <button
+                            className="share-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              shareWin(row);
+                            }}
+                          >
                             Share
                           </button>
                         )}
@@ -2253,6 +2374,391 @@ export default function App() {
             ))}
           </div>
         </section>
+      )}
+
+      {detail && (
+        <div className="confirm-backdrop" onClick={() => setDetail(null)}>
+          <div
+            className="confirm-card bet-sheet position-detail"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="position-detail-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="wallet-sheet-head">
+              <h2 id="position-detail-title">
+                {detail.type === "sealed"
+                  ? "Sealed ticket"
+                  : detail.type === "open"
+                    ? "Open position"
+                    : detail.type === "claimable"
+                      ? "Claimable"
+                      : "Activity"}
+              </h2>
+              <button type="button" className="ghost" onClick={() => setDetail(null)}>
+                Close
+              </button>
+            </div>
+
+            {detail.type === "sealed" &&
+              (() => {
+                const s = seals.find((x) => x.id === detail.seal.id) ?? detail.seal;
+                const left = s.revealBy - nowMs / 1000;
+                const late = left <= 0;
+                const mins = Math.max(0, Math.floor(left / 60));
+                const secs = Math.max(0, Math.floor(left % 60));
+                const autoSoon = !late && inAutoRevealWindow(s.revealBy, nowMs / 1000) && autoReveal;
+                return (
+                  <>
+                    <div className="detail-hero">
+                      <span className="asset-icon">{ASSET_ICON[s.asset]}</span>
+                      <div>
+                        <strong>
+                          {s.asset} · {formatWindow(s.timeframe)}
+                        </strong>
+                        <p className="muted">
+                          Your side{" "}
+                          <span className={`confirm-side ${s.side}`}>
+                            {s.side === "up" ? "Up" : "Down"}
+                          </span>
+                          {s.parlayId ? " · sealed double leg" : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <dl className="detail-grid">
+                      <div>
+                        <dt>Stake</dt>
+                        <dd>{money(s.amount, network)}</dd>
+                      </div>
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{late ? "Reveal window closed" : "Sealed"}</dd>
+                      </div>
+                      <div>
+                        <dt>Reveal by</dt>
+                        <dd className={late ? "detail-warn" : ""}>
+                          {late
+                            ? "Closed"
+                            : `${mins}m ${String(secs).padStart(2, "0")}s`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Auto-reveal</dt>
+                        <dd>
+                          {autoReveal
+                            ? autoSoon
+                              ? "Firing soon (on)"
+                              : `On · last ~${AUTO_REVEAL_WINDOW_SEC}s`
+                            : "Off — reveal manually or refund"}
+                        </dd>
+                      </div>
+                      {s.commitHash && (
+                        <div className="detail-span">
+                          <dt>Commit tx</dt>
+                          <dd>
+                            <a
+                              href={txExplorerUrl(s.commitHash)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="detail-link"
+                            >
+                              {shorten(s.commitHash)}
+                              <ExternalLinkIcon size={12} />
+                            </a>
+                          </dd>
+                        </div>
+                      )}
+                      <div className="detail-span">
+                        <dt>Market</dt>
+                        <dd className="detail-mono">{shorten(s.marketId, 8)}</dd>
+                      </div>
+                    </dl>
+                    <p className="detail-explain">
+                      {late
+                        ? "The reveal window closed without unsealing. Your side was never shown on-chain — claim the refund to get your stake back."
+                        : autoReveal
+                          ? `Side stays hidden until you Reveal. If you leave, Keel auto-reveals in the last ~${AUTO_REVEAL_WINDOW_SEC}s so the trade still places. Refund anytime before that to cancel — side never shown.`
+                          : "Side stays hidden until you Reveal on Positions. Auto-reveal is off for this device — reveal yourself or refund to cancel."}
+                    </p>
+                    <div className="detail-actions">
+                      {!late && (
+                        <button
+                          className="seal-cta reveal"
+                          disabled={busy || !signedIn}
+                          onClick={() => {
+                            void (async () => {
+                              await onReveal(s);
+                              const still = loadSeals(network).find(
+                                (x) => x.id === s.id && x.status === "sealed",
+                              );
+                              if (!still) setDetail(null);
+                            })();
+                          }}
+                        >
+                          Reveal
+                        </button>
+                      )}
+                      <button
+                        className="seal-cta refund"
+                        disabled={busy || !signedIn}
+                        onClick={() => {
+                          void (async () => {
+                            await onRefundSeal(s);
+                            const still = loadSeals(network).find(
+                              (x) => x.id === s.id && x.status === "sealed",
+                            );
+                            if (!still) setDetail(null);
+                          })();
+                        }}
+                      >
+                        Refund
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+
+            {detail.type === "open" &&
+              (() => {
+                const p = detail.position;
+                const related = journalFor(p.marketId, p.side);
+                const placeRow =
+                  related.find((r) => r.kind === "trade" || r.kind === "reveal" || r.kind === "parlay") ??
+                  null;
+                const commitRow = related.find((r) => r.kind === "commit") ?? null;
+                const revealRow = related.find((r) => r.kind === "reveal") ?? null;
+                return (
+                  <>
+                    <div className="detail-hero">
+                      <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
+                      <div>
+                        <strong>
+                          {p.asset} · {formatWindow(p.timeframe)}
+                        </strong>
+                        <p className="muted">
+                          <span className={`confirm-side ${p.side}`}>
+                            {p.side === "up" ? "Up" : "Down"}
+                          </span>
+                          {" · "}
+                          <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
+                          {p.parlayId ? " · double" : ""}
+                          {p.fromChain ? " · on-chain" : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <dl className="detail-grid">
+                      <div>
+                        <dt>Stake</dt>
+                        <dd>{p.stake !== null ? money(p.stake, network) : "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Entry chance</dt>
+                        <dd>{p.entryProb !== null ? formatProb(p.entryProb) : "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Contracts</dt>
+                        <dd>{p.contracts > 0 ? formatUsd(p.contracts, 3) : "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{STATUS_LABEL[p.status]}</dd>
+                      </div>
+                      {placeRow?.hash && (
+                        <div className="detail-span">
+                          <dt>Place / trade tx</dt>
+                          <dd>
+                            <a
+                              href={txExplorerUrl(placeRow.hash)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="detail-link"
+                            >
+                              {shorten(placeRow.hash)}
+                              <ExternalLinkIcon size={12} />
+                            </a>
+                          </dd>
+                        </div>
+                      )}
+                      <div className="detail-span">
+                        <dt>Market id</dt>
+                        <dd className="detail-mono">{shorten(p.marketId, 8)}</dd>
+                      </div>
+                      {commitRow && (
+                        <div className="detail-span">
+                          <dt>Sealed</dt>
+                          <dd>{new Date(commitRow.at).toLocaleString()}</dd>
+                        </div>
+                      )}
+                      {revealRow && (
+                        <div className="detail-span">
+                          <dt>Revealed</dt>
+                          <dd>{new Date(revealRow.at).toLocaleString()}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    <p className="detail-explain">
+                      Live ticket on DreamDEX until the window settles. Claim winners from Positions when
+                      the market resolves.
+                    </p>
+                  </>
+                );
+              })()}
+
+            {detail.type === "claimable" &&
+              (() => {
+                const c = detail.claimable;
+                const market = markets.find((m) => m.marketId === c.marketId);
+                return (
+                  <>
+                    <div className="detail-hero">
+                      <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
+                      <div>
+                        <strong>
+                          {c.asset} · {formatWindow(c.timeframe)}
+                        </strong>
+                        <p className="muted">
+                          <span className={`confirm-side ${c.side}`}>
+                            {c.side === "up" ? "Up" : "Down"}
+                          </span>
+                          {c.resolved ? " · settled" : " · settling"}
+                          {c.fromChain ? " · on-chain" : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <dl className="detail-grid">
+                      <div>
+                        <dt>Payout est.</dt>
+                        <dd>{money(c.estimatedPayout, network)}</dd>
+                      </div>
+                      <div>
+                        <dt>Contracts</dt>
+                        <dd>{formatUsd(c.contracts, 3)}</dd>
+                      </div>
+                      <div className="detail-span">
+                        <dt>Market</dt>
+                        <dd className="detail-mono">{shorten(c.marketId, 8)}</dd>
+                      </div>
+                      {market && (
+                        <div className="detail-span">
+                          <dt>Settlement</dt>
+                          <dd>
+                            {STATUS_LABEL[market.status]}
+                            {market.winningOutcome != null
+                              ? ` · winner ${market.winningOutcome === 1 ? "Up" : market.winningOutcome === 2 ? "Down" : market.winningOutcome}`
+                              : ""}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+                    <p className="detail-explain">
+                      Window settled in your favor. Claim to pull payout into your wallet
+                      {autoClaim ? " — auto-claim is on for this device." : "."}
+                    </p>
+                    <div className="detail-actions">
+                      <button
+                        disabled={busy || !signedIn || c.estimatedPayout <= 0}
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout);
+                              setDetail(null);
+                            } catch {
+                              /* onRedeem surfaces errors via toast */
+                            }
+                          })();
+                        }}
+                      >
+                        Claim {money(c.estimatedPayout, network)}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+
+            {detail.type === "activity" &&
+              (() => {
+                const row = detail.row;
+                const asset = row.asset ?? detectAsset(row.symbol || row.marketId);
+                return (
+                  <>
+                    <div className="detail-hero">
+                      <span className="asset-icon">{ASSET_ICON[asset]}</span>
+                      <div>
+                        <strong>
+                          {asset}
+                          {row.side ? ` · ${row.side === "up" ? "Up" : "Down"}` : ""}
+                        </strong>
+                        <p className="muted">
+                          {KIND_LABEL[row.kind] ?? row.kind} · {new Date(row.at).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    <dl className="detail-grid">
+                      {row.stake !== undefined && (
+                        <div>
+                          <dt>Stake</dt>
+                          <dd>{money(row.stake, network)}</dd>
+                        </div>
+                      )}
+                      {row.entryProb !== undefined && (
+                        <div>
+                          <dt>Entry chance</dt>
+                          <dd>{formatProb(row.entryProb)}</dd>
+                        </div>
+                      )}
+                      {row.payout !== undefined && (
+                        <div>
+                          <dt>Payout</dt>
+                          <dd>{money(row.payout, network)}</dd>
+                        </div>
+                      )}
+                      {row.result && (
+                        <div>
+                          <dt>Result</dt>
+                          <dd>{row.result}</dd>
+                        </div>
+                      )}
+                      {row.hash && (
+                        <div className="detail-span">
+                          <dt>Tx</dt>
+                          <dd>
+                            <a
+                              href={txExplorerUrl(row.hash)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="detail-link"
+                            >
+                              {shorten(row.hash)}
+                              <ExternalLinkIcon size={12} />
+                            </a>
+                          </dd>
+                        </div>
+                      )}
+                      {row.marketId && (
+                        <div className="detail-span">
+                          <dt>Market</dt>
+                          <dd className="detail-mono">{shorten(row.marketId, 8)}</dd>
+                        </div>
+                      )}
+                      {row.note && (
+                        <div className="detail-span">
+                          <dt>Note</dt>
+                          <dd>{row.note}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {row.kind === "redeem" && row.result === "win" && (
+                      <div className="detail-actions">
+                        <button type="button" className="ghost" onClick={() => shareWin(row)}>
+                          Share
+                        </button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+          </div>
+        </div>
       )}
     </div>
   );

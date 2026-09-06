@@ -1978,6 +1978,139 @@ th {
   color: var(--down);
 }
 
+.activity-row--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.activity-row--clickable:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-2);
+}
+
+.activity-row--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.market:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.confirm-card.position-detail {
+  max-width: 480px;
+}
+
+.detail-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+
+.detail-hero .asset-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.detail-hero strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.detail-hero p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.detail-grid > div {
+  min-width: 0;
+}
+
+.detail-grid .detail-span {
+  grid-column: 1 / -1;
+}
+
+.detail-grid dt {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.detail-grid dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.detail-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.detail-warn {
+  color: var(--down);
+}
+
+.detail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.detail-link:hover {
+  text-decoration: underline;
+}
+
+.detail-explain {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.detail-actions .seal-cta,
+.detail-actions button {
+  flex: 1 1 140px;
+}
+
+@media (max-width: 560px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 @media (max-width: 560px) {
   .seal-primer {
     flex-direction: column;
