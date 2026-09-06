@@ -4,8 +4,12 @@ import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMa
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
 
 
-const isDemoMode = () => {
-  try { return window.location.search.includes("demo=1") || (window as any).__KEEL_DEMO_MODE; } catch { return false; }
+export const isDemoMode = (): boolean => {
+  try {
+    return window.location.search.includes("demo=1") || Boolean((window as any).__KEEL_DEMO_MODE);
+  } catch {
+    return false;
+  }
 };
 
 export type SessionConfig = {
@@ -185,10 +189,11 @@ export function maskKey(key: string): string {
 
 async function resolveNetworkConfig(network: NetworkName) {
   const sdk = await import("@somnia-chain/markets-sdk");
-  const chainMod = await import("@somnia-chain/markets-sdk/chains").catch(() => null);
+  const chainMod = await import("@somnia-chain/markets-sdk/chains");
 
   const isTest = network === "shannon";
-  const chain = (isTest ? chainMod?.somniaShannon ?? sdk.somniaShannon : chainMod?.somniaMainnet ?? sdk.somniaMainnet) ?? undefined;
+  const chain = isTest ? chainMod.somniaShannon : chainMod.somniaMainnet;
+  if (!chain) throw new Error("Somnia chain definition not found in the SDK.");
   const addresses = isTest ? sdk.SOMNIA_TESTNET_ADDRESSES : sdk.SOMNIA_MAINNET_ADDRESSES;
   const indexerUrl = isTest ? "https://dev.smk.somnia.host/v1/graphql" : "https://prd.smk.somnia.host/v1/graphql";
   const wsRpcUrl = isTest ? "wss://dream-rpc.somnia.network/ws" : "wss://api.infra.mainnet.somnia.network/ws";
@@ -202,7 +207,13 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
 
   const { sdk, chain, addresses, indexerUrl, wsRpcUrl } = await resolveNetworkConfig(config.network);
 
-  const opts: Record<string, unknown> = {
+  const opts: {
+    indexerUrl: string;
+    chain: typeof chain;
+    wsRpcUrl: string;
+    addresses: typeof addresses;
+    privateKey?: `0x${string}`;
+  } = {
     indexerUrl,
     chain,
     wsRpcUrl,
@@ -216,10 +227,11 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
     accountAddress = null;
   }
 
-  exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
+  const ex = new sdk.SomniaMarkets(opts) as unknown as Exchange;
+  exchange = ex;
   lastConfig = fingerprint;
   try {
-    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+    await withTimeout(withRetry(() => ex.loadMarkets(true)), 12000, "Market list");
   } catch {
     /* indexer can still list windows if the chain socket is slow */
   }
@@ -253,6 +265,9 @@ function getInjectedProvider(): InjectedProvider | null {
 
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (/createTrader|is authenticated|construct SomniaMarkets|privateKey \/ account \/ walletClient|walletClient/i.test(msg)) {
+    return "Connect a wallet (or open with ?demo=1) to place this bet.";
+  }
   if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted|TransactionReceiptNotFoundError/i.test(msg)) {
     return "The wallet signed. Keel didn't get the receipt back. Check Positions — if the position is there, you're in. If not, refresh and place again.";
   }
@@ -344,17 +359,18 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
     /* already on Shannon, or OKX can't switch — still try to trade */
   }
 
-  exchange = new sdk.SomniaMarkets({
+  const ex = new sdk.SomniaMarkets({
     indexerUrl,
     chain,
     wsRpcUrl,
     addresses,
     walletClient,
   }) as unknown as Exchange;
+  exchange = ex;
   lastConfig = `${network}:injected:${address.toLowerCase()}`;
   accountAddress = address;
   try {
-    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+    await withTimeout(withRetry(() => ex.loadMarkets(true)), 12000, "Market list");
   } catch {
     /* still list from indexer */
   }
@@ -583,8 +599,11 @@ function resolveMarketMeta(
   const directAsset: WindowMarket["asset"] | null = rawAsset === "BTC" || rawAsset === "ETH" ? (rawAsset as "BTC" | "ETH") : null;
   const directExpiry = extractExpiry(market);
   const tradingStart = Number(market?.tradingStart ?? market?.info?.tradingStart ?? 0);
+  // Ignore absurd intervals (e.g. tradingStart=0 → multi-day "3804262s" titles).
+  const candidate =
+    directExpiry && tradingStart > 0 ? directExpiry - tradingStart : Number(market?.intervalSec ?? market?.info?.intervalSec ?? 0);
   const rawInterval =
-    directExpiry && tradingStart ? directExpiry - tradingStart : Number(market?.intervalSec ?? market?.info?.intervalSec ?? 0);
+    Number.isFinite(candidate) && candidate >= 60 && candidate <= 48 * 3600 ? candidate : 0;
   const directTimeframe = intervalToTimeframe(rawInterval);
 
   const symbol = SYMBOL_RE.test(declaredSymbol) ? declaredSymbol : findSymbolLike(market) || declaredSymbol;
@@ -593,7 +612,11 @@ function resolveMarketMeta(
   const asset = directAsset ?? meta?.asset ?? detectAsset(symbol || declaredSymbol);
   const expirySec = directExpiry || meta?.expirySec || 0;
   const now = Date.now() / 1000;
-  const timeframe = directTimeframe || detectTimeframe(expirySec ? expirySec - now : 0, symbol);
+  const secondsLeft = expirySec ? expirySec - now : 0;
+  const timeframe =
+    (directTimeframe && !directTimeframe.endsWith("s") ? directTimeframe : "") ||
+    detectTimeframe(secondsLeft, symbol) ||
+    (directTimeframe || "other");
 
   return { symbol: symbol || declaredSymbol, asset, expirySec, timeframe };
 }
@@ -633,7 +656,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
 
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
     const live = await withTimeout(
-      withRetry(() => exchange.client.listLiveBinaryMarkets!({ limit: 50 })),
+      withRetry(() => exchange!.client.listLiveBinaryMarkets!({ limit: 50 })),
       12000,
       "Market list",
     );
@@ -787,8 +810,17 @@ export async function placeStake(args: {
   side: Side;
   stake: number;
 }): Promise<{ hash?: string; raw: unknown }> {
-  if (isDemoMode()) { await new Promise(r => setTimeout(r, 1500)); return { hash: "0x123", raw: {} }; }
+  if (isDemoMode()) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const implied = args.market.impliedUp ?? 0.5;
+    const entry = args.side === "up" ? implied : 1 - implied;
+    return {
+      hash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`,
+      raw: { demo: true, side: args.side, entryProb: entry, marketId: args.market.marketId },
+    };
+  }
   if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
+  if (!accountAddress) throw new Error("Connect a wallet (or use ?demo=1) to place a bet.");
   await assertTrading(args.market.marketId);
 
   // Ensure markets are loaded before order creation to avoid "unknown symbol" from SDK
@@ -885,6 +917,11 @@ export async function redeemMarket(
   marketId: string,
   side: Side,
 ): Promise<{ hash?: string; hashes: string[]; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
+  if (isDemoMode()) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const hash = `0xdemo${Date.now().toString(16).padStart(56, "0")}`;
+    return { hash, hashes: [hash], result: "win", raw: { demo: true, marketId, side } };
+  }
   if (!exchange) throw new Error("Exchange is not connected.");
 
   const oc = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
@@ -1187,7 +1224,14 @@ export async function getMarketProbabilityHistory(
 ): Promise<ProbabilityPoint[]> {
   if (!exchange?.client.getCandles) return [];
   const raw = market.raw as Record<string, unknown> | undefined;
-  const pool = String(raw?.poolAddress ?? raw?.pool ?? "");
+  const pool = String(
+    market.poolAddress ||
+      raw?.poolAddress ||
+      raw?.binaryPoolAddress ||
+      raw?.pool ||
+      (raw?.info as Record<string, unknown> | undefined)?.poolAddress ||
+      "",
+  );
   if (!pool || !pool.startsWith("0x")) return [];
   const quoteDecimals = Number(raw?.quoteDecimals ?? 6);
   const from = market.tradingStartSec || undefined;
@@ -1198,12 +1242,26 @@ export async function getMarketProbabilityHistory(
       from,
       to,
     });
-    return candles
-      .map((c) => ({
-        t: Number(c.bucketStart) * 1000,
-        probUp: Math.min(1, Math.max(0, Number(c.closePrice) / 10 ** quoteDecimals)),
-      }))
+    const points = candles
+      .map((c) => {
+        const raw = Number(c.closePrice);
+        // Indexer sometimes returns already-normalized 0..1 prices; sometimes fixed-point.
+        const scaled = raw > 1.5 ? raw / 10 ** quoteDecimals : raw;
+        return {
+          t: Number(c.bucketStart) * 1000,
+          probUp: Math.min(1, Math.max(0, scaled)),
+        };
+      })
       .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.probUp));
+    // Align to live Up book when the tape looks inverted (1−p mismatch).
+    const liveUp = market.impliedUp;
+    if (liveUp !== null && Number.isFinite(liveUp) && points.length > 0) {
+      const last = points[points.length - 1].probUp;
+      if (Math.abs(last - (1 - liveUp)) + 0.02 < Math.abs(last - liveUp)) {
+        return points.map((p) => ({ ...p, probUp: 1 - p.probUp }));
+      }
+    }
+    return points;
   } catch {
     return [];
   }
@@ -1228,7 +1286,11 @@ export async function getRecentLeaderboard(
 ): Promise<LeaderboardEntry[]> {
   if (!exchange?.client.listPastBinaryMarkets || !exchange.client.getFills) return [];
   try {
-    const past = await exchange.client.listPastBinaryMarkets({ limit: opts.marketLimit ?? 10 });
+    const past = await withTimeout(
+      exchange.client.listPastBinaryMarkets({ limit: opts.marketLimit ?? 10 }),
+      10000,
+      "Leaderboard markets",
+    );
     const totals = new Map<string, { wins: number; volumeWon: number }>();
 
     for (const m of past) {
@@ -1240,7 +1302,7 @@ export async function getRecentLeaderboard(
 
       let fills: FillShape[] = [];
       try {
-        fills = await exchange.client.getFills(pool, { limit: 200 });
+        fills = await withTimeout(exchange.client.getFills(pool, { limit: 200 }), 6000, "Leaderboard fills");
       } catch {
         continue;
       }

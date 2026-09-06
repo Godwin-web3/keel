@@ -51,6 +51,7 @@ import {
   placeStake,
   redeemMarket,
   watchPools,
+  isDemoMode,
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
@@ -141,6 +142,7 @@ export default function App() {
   const [sparks, setSparks] = useState<Record<string, ProbabilityPoint[]>>({});
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [leaderboardBusy, setLeaderboardBusy] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const refreshingRef = useRef(false);
   const autoClaimingRef = useRef<Set<string>>(new Set());
@@ -182,6 +184,28 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Auto-dismiss success/error toasts so they don't stick across Run/Markets.
+  useEffect(() => {
+    if (!message) return;
+    const id = setTimeout(() => setMessage(null), 4500);
+    return () => clearTimeout(id);
+  }, [message]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMoreOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
+
+  function goTab(next: Tab) {
+    setTab(next);
+    setMessage(null);
+    setMoreOpen(false);
+  }
+
   useEffect(() => {
     function sync() {
       setEntered(isAppRoute());
@@ -219,6 +243,16 @@ export default function App() {
   }
 
   function openTicket(m: WindowMarket, side: Side) {
+    if (m.impliedUp === null) {
+      setMessage({ kind: "error", text: "Odds are still loading for this market." });
+      return;
+    }
+    if (!signedIn) {
+      setSelectedId(m.marketId);
+      setWalletOpen(true);
+      setMessage({ kind: "error", text: "Connect a wallet (or use ?demo=1) to place a bet." });
+      return;
+    }
     setSelectedId(m.marketId);
     setPendingBet({ kind: "single", side });
     setBetOpen(true);
@@ -329,9 +363,19 @@ export default function App() {
 
   async function loadLeaderboard() {
     setLeaderboardBusy(true);
+    setLeaderboardError(null);
     try {
-      const rows = await getRecentLeaderboard();
+      const rows = await Promise.race([
+        getRecentLeaderboard(),
+        new Promise<LeaderboardEntry[]>((_, reject) =>
+          setTimeout(() => reject(new Error("Leaderboard timed out")), 15000),
+        ),
+      ]);
       setLeaderboard(rows);
+      if (rows.length === 0) setLeaderboardError(null);
+    } catch (err) {
+      setLeaderboard([]);
+      setLeaderboardError(err instanceof Error ? err.message : "Couldn't load leaderboard.");
     } finally {
       setLeaderboardBusy(false);
     }
@@ -374,6 +418,10 @@ export default function App() {
   // (a fresh browser, cleared storage, a bet placed elsewhere). Never blocks
   // the rest of the UI on failure — journal-derived positions still work.
   async function discoverPositions(address: string) {
+    if (isDemoMode() || address.toLowerCase().startsWith("0xdemo")) {
+      setOnchainPositions({ open: [], claimable: [] });
+      return;
+    }
     try {
       const rows = await discoverOnchainPositions(address as `0x${string}`);
       setOnchainPositions(rows);
@@ -527,7 +575,16 @@ export default function App() {
   }
 
   useEffect(() => {
-    void connectAndLoad(network);
+    void (async () => {
+      const ok = await connectAndLoad(network);
+      if (ok && isDemoMode()) {
+        // Demo mode mocks writes — sign in with a local alias so ticket /
+        // seal / claim / run buttons are not stuck behind a real wallet.
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+        setMessage({ kind: "ok", text: "Demo mode · writes are mocked." });
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -540,7 +597,13 @@ export default function App() {
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
     setSelectedId(null);
-    void connectAndLoad(next);
+    void (async () => {
+      const ok = await connectAndLoad(next);
+      if (ok && isDemoMode()) {
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+      }
+    })();
   }
 
   function onDisconnect() {
@@ -551,11 +614,27 @@ export default function App() {
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
     setMessage({ kind: "ok", text: "Disconnected. Nothing you connected with was ever saved anywhere." });
-    void connectAndLoad(network);
+    void (async () => {
+      const ok = await connectAndLoad(network);
+      if (ok && isDemoMode()) {
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+        setMessage({ kind: "ok", text: "Back to demo session. Writes stay mocked." });
+      }
+    })();
   }
 
   async function onTrade(side: Side, market = selected, amount = stake, runId?: string) {
     if (!market) return;
+    if (!signedIn && !isDemoMode()) {
+      setWalletOpen(true);
+      setMessage({ kind: "error", text: "Connect a wallet (or use ?demo=1) to place a bet." });
+      return;
+    }
+    if (market.impliedUp === null) {
+      setMessage({ kind: "error", text: "Odds aren't ready yet — wait a moment and try again." });
+      return;
+    }
     const q = quoteTicket(side, amount, market.impliedUp);
     setBusy(true);
     setMessage(null);
@@ -607,7 +686,7 @@ export default function App() {
       setTab("desk");
       setMessage({
         kind: "ok",
-        text: `Sealed. The outcome remains opaque ${side === "up" ? "Up" : "Down"} until you reveal.`,
+        text: "Sealed. Side stays hidden on-chain until you reveal.",
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -951,7 +1030,7 @@ export default function App() {
         </div>
         <div className="nav-actions">
           {totalUnclaimed > 0 && (
-            <button className="unclaimed-pill" onClick={() => setTab("desk")}>
+            <button className="unclaimed-pill" onClick={() => goTab("desk")}>
               {money(totalUnclaimed, network)} to claim
             </button>
           )}
@@ -965,23 +1044,32 @@ export default function App() {
               <MoonIcon />
             )}
           </button>
-          <div className="more-menu-wrap">
+          <div className={`more-menu-wrap ${moreOpen ? "open" : ""}`}>
             <button
               className={`more-trigger ${moreOpen ? "active" : ""}`}
               aria-label="More"
+              aria-expanded={moreOpen}
               onClick={() => setMoreOpen((v) => !v)}
             >
               <MenuIcon />
             </button>
             {moreOpen && (
               <>
-                <div className="menu-catcher" onClick={() => setMoreOpen(false)} />
-                <div className="dropdown-menu">
+                <div
+                  className="menu-catcher"
+                  role="presentation"
+                  onClick={() => setMoreOpen(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setMoreOpen(false);
+                  }}
+                />
+                <div className="dropdown-menu" role="menu">
                   <a
                     className="dropdown-item"
                     href="https://github.com/Godwin-web3/keel"
                     target="_blank"
                     rel="noreferrer"
+                    role="menuitem"
                     onClick={() => setMoreOpen(false)}
                   >
                     <ExternalLinkIcon />
@@ -1042,12 +1130,31 @@ export default function App() {
                     )}
                   </button>
                 </div>
+                {isDemoMode() && (
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button
+                      className="ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setConnected(true);
+                        setSignedIn(true);
+                        setWalletAddress("0xDemo000000000000000000000000000000000001");
+                        setWalletOpen(false);
+                        setMessage({ kind: "ok", text: "Demo session on. Blockchain writes are mocked." });
+                      }}
+                    >
+                      Continue in demo
+                    </button>
+                  </div>
+                )}
                 <p className="muted" style={{ marginTop: 12 }}>
-                  {injectedAvailable
-                    ? "Use MetaMask or Rabby. You can look around first."
-                    : "No wallet found. Install MetaMask, then refresh."}
+                  {isDemoMode()
+                    ? "Demo mode is on (?demo=1). You can commit, reveal, and claim without a wallet."
+                    : injectedAvailable
+                      ? "Use MetaMask or Rabby. You can look around first."
+                      : "No wallet found. Install MetaMask, then refresh."}
                 </p>
-                {!injectedAvailable && (
+                {!injectedAvailable && !isDemoMode() && (
                   <a className="repo-link" href="https://metamask.io/download" target="_blank" rel="noreferrer">
                     Get MetaMask
                   </a>
@@ -1082,7 +1189,7 @@ export default function App() {
                 <p className="plain">
                   {selected.asset === "OTHER" ? "This market" : selected.asset} · {formatWindow(selected.timeframe)}
                 </p>
-                <PriceChart points={chartPoints} height={140} />
+                <PriceChart points={chartPoints} height={140} liveUp={selected.impliedUp} />
                 <p className="ticket-edge">{formatEdge(selected.impliedUp, spotMovePct(spotPrice, selected.strike))}</p>
                 {parlayPartner && (
                   <label className="parlay-toggle">
@@ -1169,35 +1276,45 @@ export default function App() {
                 <div className="actions">
                   <button
                     className="up"
-                    disabled={busy || !signedIn || selected.status !== "trading"}
+                    disabled={busy || !signedIn || selected.status !== "trading" || selected.impliedUp === null}
                     onClick={() =>
                       parlayOn && parlayPartner
                         ? setPendingBet({ kind: "parlay", a: "up", b: parlaySideB })
                         : setPendingBet({ kind: "single", side: "up" })
                     }
                   >
-                    {parlayOn ? `Up × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}` : "Bet Up"}
+                    {selected.impliedUp === null
+                      ? "Loading odds…"
+                      : parlayOn
+                        ? `Up × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}`
+                        : "Bet Up"}
                   </button>
                   <button
                     className="down"
-                    disabled={busy || !signedIn || selected.status !== "trading"}
+                    disabled={busy || !signedIn || selected.status !== "trading" || selected.impliedUp === null}
                     onClick={() =>
                       parlayOn && parlayPartner
                         ? setPendingBet({ kind: "parlay", a: "down", b: parlaySideB })
                         : setPendingBet({ kind: "single", side: "down" })
                     }
                   >
-                    {parlayOn ? `Down × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}` : "Bet Down"}
+                    {selected.impliedUp === null
+                      ? "Loading odds…"
+                      : parlayOn
+                        ? `Down × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}`
+                        : "Bet Down"}
                   </button>
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
                   {selected.status !== "trading"
                     ? "This one isn't open right now."
-                    : !signedIn
-                      ? "Connect your wallet to place this."
-                      : sealOn
-                        ? "Seal it first. The outcome is opaque until you reveal."
-                        : "You only lose what you put in."}
+                    : selected.impliedUp === null
+                      ? "Waiting for odds…"
+                      : !signedIn
+                        ? "Connect your wallet to place this."
+                        : sealOn
+                          ? "Seal it first. The outcome is opaque until you reveal."
+                          : "You only lose what you put in."}
                 </p>
               </>
             )}
@@ -1225,20 +1342,34 @@ export default function App() {
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
                     className={pendingBet.side}
-                    disabled={busy}
+                    disabled={busy || !signedIn || selected.impliedUp === null}
                     onClick={() => {
+                      if (!signedIn) {
+                        setWalletOpen(true);
+                        setMessage({ kind: "error", text: "Connect a wallet (or use ?demo=1) to place a bet." });
+                        return;
+                      }
                       const side = pendingBet.side;
                       closeBetSheet();
                       if (sealOn) void onSeal(side);
                       else void onTrade(side);
                     }}
                   >
-                    {sealOn ? `Seal ${pendingBet.side === "up" ? "Up" : "Down"}` : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
+                    {!signedIn
+                      ? "Connect to confirm"
+                      : sealOn
+                        ? `Seal ${pendingBet.side === "up" ? "Up" : "Down"}`
+                        : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
                   </button>
                 </div>
+                {!signedIn && (
+                  <p className="muted" style={{ marginTop: 12 }}>
+                    Connect a wallet (or open with ?demo=1) before confirming.
+                  </p>
+                )}
               </>
             )}
 
@@ -1267,15 +1398,20 @@ export default function App() {
                 </div>
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
-                    disabled={busy}
+                    disabled={busy || !signedIn}
                     onClick={() => {
+                      if (!signedIn) {
+                        setWalletOpen(true);
+                        setMessage({ kind: "error", text: "Connect a wallet (or use ?demo=1) to place a bet." });
+                        return;
+                      }
                       const a = pendingBet.a;
                       const b = pendingBet.b;
                       closeBetSheet();
                       void onParlay(a, b);
                     }}
                   >
-                    Confirm both commitments
+                    {!signedIn ? "Connect to confirm" : "Confirm both commitments"}
                   </button>
                   <button className="ghost" onClick={() => setPendingBet(null)}>
                     Back
@@ -1290,22 +1426,22 @@ export default function App() {
       {message && <div className={`banner ${message.kind}`}>{message.text}</div>}
 
       <nav className="bottom-nav">
-        <button className={tab === "markets" ? "active" : ""} onClick={() => setTab("markets")}>
+        <button className={tab === "markets" ? "active" : ""} onClick={() => goTab("markets")}>
           <MarketsIcon size={22} />
           Markets
         </button>
-        <button className={tab === "run" ? "active" : ""} onClick={() => setTab("run")}>
+        <button className={tab === "run" ? "active" : ""} onClick={() => goTab("run")}>
           <RunIcon size={22} />
           Run
         </button>
-        <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
+        <button className={tab === "desk" ? "active" : ""} onClick={() => goTab("desk")}>
           <PositionsIcon size={22} />
           Positions{claimable.length > 0 ? ` · ${claimable.length}` : ""}
         </button>
         <button
           className={tab === "leaderboard" ? "active" : ""}
           onClick={() => {
-            setTab("leaderboard");
+            goTab("leaderboard");
             if (leaderboard === null && !leaderboardBusy) void loadLeaderboard();
           }}
         >
@@ -1379,6 +1515,7 @@ export default function App() {
               const upPct = m.impliedUp === null ? null : Math.round(m.impliedUp * 100);
               const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
               const live = m.status === "trading";
+              const oddsReady = upPct !== null;
               return (
                 <article
                   key={m.marketId}
@@ -1394,29 +1531,35 @@ export default function App() {
                       </p>
                       <h3>Will {m.asset} go up in the next {formatWindow(m.timeframe)}?</h3>
                     </div>
-                    {upPct !== null && <ChanceMeter pct={upPct} />}
+                    {oddsReady ? (
+                      <ChanceMeter pct={upPct} />
+                    ) : live ? (
+                      <div className="chance-meter skeleton skeleton-circle" style={{ width: 52, height: 52 }} aria-hidden />
+                    ) : null}
                   </div>
                   {sparks[m.marketId] && sparks[m.marketId].length > 1 && (
-                    <PriceChart points={sparks[m.marketId]} height={72} />
+                    <PriceChart points={sparks[m.marketId]} height={72} liveUp={m.impliedUp} />
                   )}
                   <div className="pm-actions">
                     <button
                       className="pm-up"
+                      disabled={!live || !oddsReady}
                       onClick={(e) => {
                         e.stopPropagation();
                         openTicket(m, "up");
                       }}
                     >
-                      Up {upPct === null ? "" : `${upPct}%`}
+                      {!oddsReady && live ? "Loading…" : `Up${oddsReady ? ` ${upPct}%` : ""}`}
                     </button>
                     <button
                       className="pm-down"
+                      disabled={!live || !oddsReady}
                       onClick={(e) => {
                         e.stopPropagation();
                         openTicket(m, "down");
                       }}
                     >
-                      Down {upPct === null ? "" : `${100 - upPct}%`}
+                      {!oddsReady && live ? "Loading…" : `Down${oddsReady ? ` ${100 - upPct!}%` : ""}`}
                     </button>
                   </div>
                   <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
@@ -1590,7 +1733,7 @@ export default function App() {
                 {filteredJournal.map((row) => (
                   <tr key={row.id}>
                     <td>{new Date(row.at).toLocaleString()}</td>
-                    <td>{KIND_LABEL[row.kind]}</td>
+                    <td>{KIND_LABEL[row.kind] ?? row.kind}</td>
                     <td>
                       <span className="asset-icon">{ASSET_ICON[row.asset ?? detectAsset(row.symbol || row.marketId)]}</span>
                       {row.asset ?? detectAsset(row.symbol || row.marketId)}
@@ -1634,10 +1777,19 @@ export default function App() {
                 <SpinnerIcon /> Loading…
               </div>
             )}
-            {!leaderboardBusy && leaderboard !== null && leaderboard.length === 0 && (
+            {!leaderboardBusy && leaderboardError && (
+              <div className="lb-empty">
+                {leaderboardError}{" "}
+                <button className="ghost" onClick={() => void loadLeaderboard()}>
+                  Retry
+                </button>
+              </div>
+            )}
+            {!leaderboardBusy && !leaderboardError && leaderboard !== null && leaderboard.length === 0 && (
               <div className="lb-empty">Nobody on the board yet.</div>
             )}
-            {leaderboard?.map((entry, i) => (
+            {!leaderboardError &&
+              leaderboard?.map((entry, i) => (
               <div key={entry.address} className={`lb-row ${i < 3 ? "podium" : ""}`}>
                 <RankMedal rank={i + 1} />
                 <div className="lb-trader">

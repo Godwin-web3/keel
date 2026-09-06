@@ -44,19 +44,19 @@ export function ChanceMeter({ pct, size = 52 }: { pct: number; size?: number }) 
   const dash = (Math.max(0, Math.min(100, pct)) / 100) * c;
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" className="chance-meter">
-      <circle cx="24" cy="24" r={r} fill="none" stroke="#2a303c" strokeWidth="4" />
+      <circle cx="24" cy="24" r={r} fill="none" className="chance-meter-track" strokeWidth="4" />
       <circle
         cx="24"
         cy="24"
         r={r}
         fill="none"
-        stroke="#3ddc8a"
+        className="chance-meter-arc"
         strokeWidth="4"
         strokeLinecap="round"
         strokeDasharray={`${dash} ${c}`}
         transform="rotate(-90 24 24)"
       />
-      <text x="24" y="28" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="650" fontFamily="inherit">
+      <text x="24" y="28" textAnchor="middle" className="chance-meter-label" fontSize="11" fontWeight="650" fontFamily="inherit">
         {Math.round(pct)}%
       </text>
     </svg>
