@@ -1300,7 +1300,7 @@ export default function App() {
         </button>
         <button className={tab === "desk" ? "active" : ""} onClick={() => setTab("desk")}>
           <PositionsIcon size={22} />
-          Bets{claimable.length > 0 ? ` · ${claimable.length}` : ""}
+          Positions{claimable.length > 0 ? ` · ${claimable.length}` : ""}
         </button>
         <button
           className={tab === "leaderboard" ? "active" : ""}
