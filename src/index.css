@@ -1984,58 +1984,436 @@ th {
   margin-top: 4px;
 }
 
+
+/* ---------- product landing (overrides earlier thin land-*) ---------- */
+
 .landing {
-  max-width: 720px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 20px 20px 64px;
+  padding: 16px 20px 72px;
+}
+
+.land-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 8px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  margin: 0 -4px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.land-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.land-nav-link {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.land-nav-link:hover {
+  color: var(--text);
+}
+
+.land-nav .connect-cta {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 0;
+  font-weight: 600;
+  padding: 8px 16px;
+  min-height: 40px;
 }
 
 .land-hero {
-  padding: 40px 0 28px;
+  padding: 48px 0 40px;
+}
+
+.land-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 18px;
 }
 
 .land-hero h1 {
   font-family: var(--font-display);
-  font-size: clamp(32px, 7vw, 52px);
+  font-size: clamp(36px, 7vw, 56px);
   font-weight: 700;
   letter-spacing: -0.04em;
-  line-height: 1.08;
-  max-width: 14ch;
+  line-height: 1.06;
+  max-width: 16ch;
+  margin: 0;
 }
 
-.land-hero p {
+.land-lede {
   color: var(--text-dim);
   font-size: 17px;
+  line-height: 1.55;
+  max-width: 48ch;
+  margin: 18px 0 0;
+}
+
+.land-text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+  padding: 10px 4px;
+  align-self: center;
+}
+
+.land-text-link:hover {
+  color: var(--accent);
+}
+
+.land-section {
+  padding: 40px 0;
+  border-top: 1px solid var(--line);
+}
+
+.land-section-head {
+  margin-bottom: 18px;
+}
+
+.land-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 8px;
+}
+
+.land-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 34px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0;
+  max-width: 22ch;
+}
+
+.land-section-lede {
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1.55;
+  max-width: 54ch;
+  margin: 0 0 20px;
+}
+
+.land-problem-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.land-pain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.land-pain-list li {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.land-pain-list strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.land-pain-list span {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.land-product-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.land-product-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 18px 20px;
+}
+
+.land-product-card--accent {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 12%, var(--bg-2)) 0%,
+    var(--bg-2) 55%
+  );
+}
+
+.land-card-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.land-product-card h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.land-product-card p {
+  color: var(--muted);
+  font-size: 14px;
   line-height: 1.5;
+  margin: 0;
+}
+
+.land-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  counter-reset: none;
+}
+
+.land-step {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 18px 20px;
+  position: relative;
+}
+
+.land-step-n {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 10px;
+}
+
+.land-step h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.land-step p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.land-feature {
+  margin: 4px 0 0;
+}
+
+.land-empty-market {
+  background: var(--bg-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  padding: 28px 22px;
+  text-align: left;
+}
+
+.land-empty-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.land-empty-market p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+  max-width: 42ch;
+}
+
+.land-app-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.land-app-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 16px 18px;
+}
+
+.land-app-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.land-app-card p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.land-trust-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.land-trust-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 16px 18px;
+}
+
+.land-trust-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text);
+  margin: 0 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  word-break: break-all;
+}
+
+.land-trust-addr {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.land-trust-addr:hover,
+.land-trust-link:hover {
+  text-decoration: underline;
+}
+
+.land-trust-link {
+  text-decoration: none;
+  color: var(--text);
+}
+
+.land-trust-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.land-close {
+  padding: 48px 0 40px;
+  border-top: 1px solid var(--line);
+}
+
+.land-close h2 {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 5vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  max-width: 14ch;
+  margin: 0;
+}
+
+.land-close p {
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1.55;
   max-width: 42ch;
   margin: 14px 0 0;
 }
 
-.land-feature {
-  margin: 8px 0 36px;
+@media (min-width: 640px) {
+  .land-product-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .land-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .land-app-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .land-trust-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .land-pain-list {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
 }
 
-.land-points {
-  list-style: none;
-  margin: 0 0 48px;
-  padding: 0;
+@media (min-width: 900px) {
+  .landing {
+    max-width: 1040px;
+    padding: 20px 24px 96px;
+  }
+
+  .land-hero {
+    padding: 64px 0 52px;
+  }
+
+  .land-steps {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .land-app-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .land-app-grid .land-app-card:nth-child(4),
+  .land-app-grid .land-app-card:nth-child(5) {
+    grid-column: span 1;
+  }
+
+  .land-trust-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .land-product-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
-
-.land-points li {
-  padding: 18px 0;
-  border-top: 1px solid var(--line);
-}
-
-.land-points strong {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 16px;
-}
-
-.land-points span {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-
