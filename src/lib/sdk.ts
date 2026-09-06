@@ -248,8 +248,8 @@ function getInjectedProvider(): InjectedProvider | null {
 
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted/i.test(msg)) {
-    return "The wallet signed. Keel didn't get the receipt back. Check Bets — if the position is there, you're in. If not, refresh and place again.";
+  if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted|TransactionReceiptNotFoundError/i.test(msg)) {
+    return "The wallet signed. Keel didn't get the receipt back. Check Positions — if the position is there, you're in. If not, refresh and place again.";
   }
   if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
@@ -796,9 +796,6 @@ export async function placeStake(args: {
   // Always BUY the outcome token. Down is #NO, not a sell on the Up book —
   // selling Up requires inventory and is the wrong fill path for a new stake.
   const symbol = outcomeSymbol(args.market, args.side);
-
-  // Also load markets when reading the book, as it might also hit SDK issues
-  await exchange.loadMarkets(false).catch(() => {});
   const book = await safeBook(symbol);
   const limit = Math.min(0.99, Math.max(0.01, (book.ask ?? price) + 0.02));
 
