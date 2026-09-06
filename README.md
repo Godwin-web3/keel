@@ -35,4 +35,4 @@ npm run dev
 ## Docs
 
 - https://docs.dreamdex.io/developers/event-contracts
-- [SDK-FEEDBACK.md](./SDK-FEEDBACK.md)
+- [SDK notes](./docs/sdk-notes.md)
