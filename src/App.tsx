@@ -199,6 +199,27 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [moreOpen]);
 
+  // Prevent background scroll while a sheet/menu is open (avoids "stuck" feel).
+  useEffect(() => {
+    if (!walletOpen && !betOpen && !moreOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [walletOpen, betOpen, moreOpen]);
+
+  useEffect(() => {
+    if (!walletOpen && !betOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (betOpen) closeBetSheet();
+      else setWalletOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [walletOpen, betOpen]);
+
   function goTab(next: Tab) {
     setTab(next);
     setMessage(null);
@@ -238,6 +259,7 @@ export default function App() {
   function selectMarket(id: string) {
     setSelectedId(id);
     setPendingBet(null);
+    setMoreOpen(false);
     setBetOpen(true);
   }
 
@@ -248,12 +270,14 @@ export default function App() {
     }
     if (!signedIn) {
       setSelectedId(m.marketId);
+      setMoreOpen(false);
       setWalletOpen(true);
       setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
       return;
     }
     setSelectedId(m.marketId);
     setPendingBet({ kind: "single", side });
+    setMoreOpen(false);
     setBetOpen(true);
   }
 
@@ -1013,7 +1037,7 @@ export default function App() {
               {money(totalUnclaimed, network)} to claim
             </button>
           )}
-          <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => setWalletOpen(true)}>
+          <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => { setMoreOpen(false); setWalletOpen(true); }}>
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect"}
           </button>
           <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>

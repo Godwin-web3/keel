@@ -71,13 +71,13 @@ export default function Landing({
             </div>
             {upPct !== null && <ChanceMeter pct={upPct} />}
           </div>
-          <PriceChart points={points} height={140} />
+          <PriceChart points={points} height={140} liveUp={featured.impliedUp} />
           <div className="pm-actions">
-            <button className="pm-up" onClick={() => onLaunch(featured.marketId)}>
-              Up {upPct === null ? "" : `${upPct}%`}
+            <button className="pm-up" disabled={upPct === null} onClick={() => onLaunch(featured.marketId)}>
+              {upPct === null ? "Loading…" : `Up ${upPct}%`}
             </button>
-            <button className="pm-down" onClick={() => onLaunch(featured.marketId)}>
-              Down {upPct === null ? "" : `${100 - upPct}%`}
+            <button className="pm-down" disabled={upPct === null} onClick={() => onLaunch(featured.marketId)}>
+              {upPct === null ? "Loading…" : `Down ${100 - upPct}%`}
             </button>
           </div>
           <p className="pm-meta">{formatCloseLabel(featured.expirySec, secondsLeft)}</p>

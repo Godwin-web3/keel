@@ -127,8 +127,8 @@ export function formatWindow(tf: string): string {
       if (sec <= 75 * 60) return "1 hour";
       const h = Math.round(sec / 3600);
       if (h >= 1 && h <= 72) return h === 1 ? "1 hour" : `${h} hours`;
-      const m = Math.max(1, Math.round(sec / 60));
-      return `${m} min`;
+      // Absurd durations (bad tradingStart math) — never show "63387 min".
+      return "this window";
     }
   }
   return tf;

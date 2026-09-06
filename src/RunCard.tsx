@@ -1,5 +1,5 @@
 import type { RunState, WindowMarket } from "./lib/types";
-import { ASSET_ICON, formatUsd } from "./lib/format";
+import { ASSET_ICON, formatUsd, formatWindow } from "./lib/format";
 import { findLiveWindow } from "./lib/instruments";
 
 const STATUS_COPY: Record<RunState["status"], string> = {
@@ -66,7 +66,7 @@ export default function RunCard({
           <div className="run-status-head">
             <strong>{STATUS_COPY[run.status]}</strong>
             <span>
-              {ASSET_ICON[run.asset]} {run.asset} · {run.timeframe} · round {run.hops.length}/{run.maxRounds}
+              {ASSET_ICON[run.asset]} {run.asset} · {formatWindow(run.timeframe)} · round {run.hops.length}/{run.maxRounds}
             </span>
           </div>
           <div className="ticket-math">

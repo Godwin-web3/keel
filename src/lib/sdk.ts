@@ -266,8 +266,23 @@ export function friendlyWalletError(err: unknown): string {
   if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
   }
-  if (/not been authorized|4100|provider is not ready|unauthorized|user rejected/i.test(msg)) {
+  if (/user rejected|user denied|rejected the request|ACTION_REJECTED|4001/i.test(msg)) {
+    return "Request cancelled in the wallet.";
+  }
+  if (/not been authorized|4100|provider is not ready|unauthorized/i.test(msg)) {
     return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. You need a little STT for gas.";
+  }
+  if (/insufficient funds|exceeds the balance|gas required exceeds/i.test(msg)) {
+    return "Not enough balance for this trade plus gas. Top up and try again.";
+  }
+  if (/ContractFunctionExecutionError|execution reverted|call revert exception|Internal JSON-RPC/i.test(msg)) {
+    return "The network rejected that transaction. Refresh markets and try again — if it keeps failing, the window may have locked.";
+  }
+  // Strip huge viem/SDK dumps down to the first readable sentence.
+  if (msg.length > 180 || /\n\s*Request Arguments|Details:|Version: viem/i.test(msg)) {
+    const first = msg.split(/[\n\r]/).map((s) => s.trim()).find((s) => s && !/^(\s*|Request Arguments|Details:|Version:)/i.test(s));
+    if (first && first.length < 160 && !/0x[a-f0-9]{40}/i.test(first)) return first;
+    return "Something went wrong with the wallet request. Try again — or reconnect and retry.";
   }
   return msg;
 }
