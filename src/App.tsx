@@ -1666,7 +1666,7 @@ export default function App() {
           </div>
           {!busy && marketsLoaded && (marketsError || (!connected && markets.length === 0)) && (
             <p className="muted">
-              Couldn't load markets.{" "}
+              {marketsError ?? "Couldn't load markets."}{" "}
               <button className="ghost" onClick={() => void connectAndLoad(network)}>
                 Retry
               </button>
