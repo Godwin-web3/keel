@@ -272,10 +272,6 @@ export default function App() {
   }
 
   function openTicket(m: WindowMarket, side: Side) {
-    if (m.impliedUp === null) {
-      setMessage({ kind: "error", text: "Odds are still loading for this market." });
-      return;
-    }
     if (!signedIn) {
       setSelectedId(m.marketId);
       setMoreOpen(false);
@@ -677,10 +673,6 @@ export default function App() {
     if (!signedIn) {
       setWalletOpen(true);
       setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
-      return;
-    }
-    if (market.impliedUp === null) {
-      setMessage({ kind: "error", text: "Odds aren't ready yet — wait a moment and try again." });
       return;
     }
     const q = quoteTicket(side, amount, market.impliedUp);
@@ -1316,7 +1308,7 @@ export default function App() {
                 <div className="actions">
                   {parlayOn && parlayPartner ? (
                     <button
-                      disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                      disabled={busy || selected.status !== "trading"}
                       onClick={() => {
                         if (!signedIn) {
                           setMoreOpen(false);
@@ -1329,15 +1321,13 @@ export default function App() {
                     >
                       {!signedIn
                         ? "Connect to review"
-                        : selected.impliedUp === null
-                          ? "Loading odds…"
-                          : `Review ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`}
+                        : `Review ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`}
                     </button>
                   ) : (
                     <>
                       <button
                         className="up"
-                        disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                        disabled={busy || selected.status !== "trading"}
                         onClick={() => {
                           if (!signedIn) {
                             setMoreOpen(false);
@@ -1348,11 +1338,11 @@ export default function App() {
                           setPendingBet({ kind: "single", side: "up" });
                         }}
                       >
-                        {!signedIn ? "Connect to bet Up" : selected.impliedUp === null ? "Loading odds…" : "Bet Up"}
+                        {!signedIn ? "Connect to bet Up" : "Bet Up"}
                       </button>
                       <button
                         className="down"
-                        disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                        disabled={busy || selected.status !== "trading"}
                         onClick={() => {
                           if (!signedIn) {
                             setMoreOpen(false);
@@ -1363,7 +1353,7 @@ export default function App() {
                           setPendingBet({ kind: "single", side: "down" });
                         }}
                       >
-                        {!signedIn ? "Connect to bet Down" : selected.impliedUp === null ? "Loading odds…" : "Bet Down"}
+                        {!signedIn ? "Connect to bet Down" : "Bet Down"}
                       </button>
                     </>
                   )}
@@ -1371,9 +1361,7 @@ export default function App() {
                 <p className="muted" style={{ marginTop: 12 }}>
                   {selected.status !== "trading"
                     ? "This one isn't open right now."
-                    : selected.impliedUp === null
-                      ? "Waiting for odds…"
-                      : !signedIn
+                    : !signedIn
                         ? "Connect your wallet to place this."
                         : sealOn
                           ? "Seal it first. The outcome is opaque until you reveal."
@@ -1405,7 +1393,7 @@ export default function App() {
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
                     className={pendingBet.side}
-                    disabled={busy || selected.impliedUp === null}
+                    disabled={busy}
                     onClick={() => {
                       if (!signedIn) {
                         setWalletOpen(true);
@@ -1606,23 +1594,23 @@ export default function App() {
                   <div className="pm-actions">
                     <button
                       className="pm-up"
-                      disabled={!live || !oddsReady}
+                      disabled={!live}
                       onClick={(e) => {
                         e.stopPropagation();
                         openTicket(m, "up");
                       }}
                     >
-                      {!oddsReady && live ? "Loading…" : `Up${oddsReady ? ` ${upPct}%` : ""}`}
+                      {oddsReady ? `Up ${upPct}%` : "Up"}
                     </button>
                     <button
                       className="pm-down"
-                      disabled={!live || !oddsReady}
+                      disabled={!live}
                       onClick={(e) => {
                         e.stopPropagation();
                         openTicket(m, "down");
                       }}
                     >
-                      {!oddsReady && live ? "Loading…" : `Down${oddsReady ? ` ${100 - upPct!}%` : ""}`}
+                      {oddsReady ? `Down ${100 - upPct!}%` : "Down"}
                     </button>
                   </div>
                   <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
