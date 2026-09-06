@@ -670,6 +670,37 @@ function yesNoSymbols(declared: string, resolved: string): { upSymbol: string; d
   return { upSymbol: src || resolved, downSymbol: `${base}#NO` };
 }
 
+/** Map marketId (lower) → ccxt trading base symbol from loadMarkets(). */
+async function tradingSymbolByMarketId(force = false): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!exchange) return map;
+  try {
+    const loaded = await exchange.loadMarkets(force);
+    for (const m of Object.values(loaded)) {
+      const id = extractMarketId(m).toLowerCase();
+      if (!id) continue;
+      const raw = String(m?.symbol || m?.info?.symbol || extractUpSymbol(m) || "");
+      const base = raw.replace(/#(YES|NO)$/i, "");
+      if (base && (base.includes("/") || SYMBOL_RE.test(base))) {
+        map.set(id, base);
+      }
+    }
+  } catch {
+    /* loadMarkets optional for enrichment */
+  }
+  return map;
+}
+
+/** Indexer lastPrice may be fixed-point; accept only plausible (0,1) probs. */
+function impliedFromIndexerLastPrice(m: any): number | null {
+  const raw = Number(m?.lastPrice);
+  if (!Number.isFinite(raw)) return null;
+  const decimals = Number(m?.quoteDecimals ?? 6);
+  const scaled = raw > 1.5 ? raw / 10 ** decimals : raw;
+  if (scaled > 0 && scaled < 1) return scaled;
+  return null;
+}
+
 export function outcomeSymbol(market: WindowMarket, side: Side): string {
   if (side === "down" && market.downSymbol) return market.downSymbol;
   if (side === "up" && market.upSymbol) return market.upSymbol;
@@ -692,6 +723,8 @@ export async function listWindows(): Promise<WindowMarket[]> {
         12000,
         "Market list",
       );
+      // Indexer rows lack ccxt symbols — resolve via loadMarkets keyed by marketId.
+      const symbolById = await tradingSymbolByMarketId(false);
       const settled = await Promise.allSettled(
         live.map(async (m) => {
           const marketId = String(m.marketId || m.id || "");
@@ -716,15 +749,19 @@ export async function listWindows(): Promise<WindowMarket[]> {
             /* indexer status fallback */
           }
           const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
-          const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
-          const { upSymbol, downSymbol } = yesNoSymbols(declaredSymbol, symbol);
+          const fromLoaded = symbolById.get(marketId.toLowerCase()) || "";
+          const tradingBase = (SYMBOL_RE.test(declaredSymbol) ? declaredSymbol.replace(/#(YES|NO)$/i, "") : "") || fromLoaded;
+          const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, tradingBase || declaredSymbol);
+          const { upSymbol, downSymbol } = yesNoSymbols(declaredSymbol || tradingBase, tradingBase || symbol);
           const secondsLeft = expirySec ? expirySec - now : 0;
-          const book = status === "trading" ? await safeBook(upSymbol || marketId) : { bid: null, ask: null, mid: null };
+          const bookSymbol = upSymbol.includes("/") || SYMBOL_RE.test(upSymbol.replace(/#(YES|NO)$/i, "")) ? upSymbol : "";
+          const book = status === "trading" && bookSymbol ? await safeBook(bookSymbol) : { bid: null, ask: null, mid: null };
+          const impliedUp = book.mid ?? (status === "trading" ? impliedFromIndexerLastPrice(m) : null);
           const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
           const row: WindowMarket = {
             marketId,
-            symbol: symbol || marketId,
-            upSymbol: upSymbol || marketId,
+            symbol: tradingBase || symbol || marketId,
+            upSymbol: upSymbol || tradingBase || marketId,
             downSymbol,
             asset,
             timeframe,
@@ -736,7 +773,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
             isResolved,
             isVoided,
             winningOutcome,
-            impliedUp: book.mid,
+            impliedUp,
             bestBid: book.bid,
             bestAsk: book.ask,
             openingPriceLabel: String(m.openingPrice ?? m.strike ?? m.refPrice ?? "window open"),
@@ -801,6 +838,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
     const { upSymbol, downSymbol } = yesNoSymbols(upRaw, symbol);
     const secondsLeft = expirySec ? expirySec - now : 0;
     const book = status === "trading" ? await safeBook(upSymbol) : { bid: null, ask: null, mid: null };
+    const impliedUp = book.mid ?? (status === "trading" ? impliedFromIndexerLastPrice(m?.info ?? m) : null);
     const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
 
     out.push({
@@ -818,7 +856,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
       isResolved,
       isVoided,
       winningOutcome,
-      impliedUp: book.mid,
+      impliedUp,
       bestBid: book.bid,
       bestAsk: book.ask,
       openingPriceLabel: "window open",
