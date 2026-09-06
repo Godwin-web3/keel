@@ -3,10 +3,12 @@ import type { ProbabilityPoint } from "./lib/sdk";
 type Props = {
   points: ProbabilityPoint[];
   height?: number;
+  /** Live Up probability from the book — keeps legend aligned with gauge/buttons. */
+  liveUp?: number | null;
 };
 
 /** A light line chart of a window's implied Up-probability over time — no charting library, just an SVG polyline. */
-export default function PriceChart({ points, height = 96 }: Props) {
+export default function PriceChart({ points, height = 96, liveUp = null }: Props) {
   if (points.length < 2) {
     return (
       <div className="price-chart empty" style={{ height }}>
@@ -15,9 +17,18 @@ export default function PriceChart({ points, height = 96 }: Props) {
     );
   }
 
+  let series = points;
+  if (liveUp !== null && Number.isFinite(liveUp)) {
+    const last = points[points.length - 1].probUp;
+    // If the tape looks like Down (1−p) vs the live Up book, flip it.
+    if (Math.abs(last - (1 - liveUp)) + 0.02 < Math.abs(last - liveUp)) {
+      series = points.map((p) => ({ ...p, probUp: 1 - p.probUp }));
+    }
+  }
+
   const width = 320;
   const pad = 4;
-  const xs = points.map((p) => p.t);
+  const xs = series.map((p) => p.t);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const spanX = maxX - minX || 1;
@@ -28,10 +39,11 @@ export default function PriceChart({ points, height = 96 }: Props) {
     return [x, y] as const;
   };
 
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${toXY(p)[0].toFixed(1)},${toXY(p)[1].toFixed(1)}`).join(" ");
-  const last = points[points.length - 1];
-  const first = points[0];
-  const trendUp = last.probUp >= first.probUp;
+  const path = series.map((p, i) => `${i === 0 ? "M" : "L"}${toXY(p)[0].toFixed(1)},${toXY(p)[1].toFixed(1)}`).join(" ");
+  const last = series[series.length - 1];
+  const first = series[0];
+  const displayUp = liveUp !== null && Number.isFinite(liveUp) ? liveUp : last.probUp;
+  const trendUp = displayUp >= (liveUp !== null ? 0.5 : first.probUp);
   const midY = pad + 0.5 * (height - pad * 2);
 
   return (
@@ -42,7 +54,7 @@ export default function PriceChart({ points, height = 96 }: Props) {
       </svg>
       <div className="chart-legend">
         <span className="muted">Chance it goes up</span>
-        <strong className={trendUp ? "up" : "down"}>{Math.round(last.probUp * 100)}%</strong>
+        <strong className={trendUp ? "up" : "down"}>{Math.round(displayUp * 100)}%</strong>
       </div>
     </div>
   );

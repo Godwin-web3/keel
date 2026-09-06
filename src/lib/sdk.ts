@@ -265,6 +265,9 @@ function getInjectedProvider(): InjectedProvider | null {
 
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (/createTrader|is authenticated|construct SomniaMarkets|privateKey \/ account \/ walletClient|walletClient/i.test(msg)) {
+    return "Connect a wallet (or open with ?demo=1) to place this bet.";
+  }
   if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted|TransactionReceiptNotFoundError/i.test(msg)) {
     return "The wallet signed. Keel didn't get the receipt back. Check Positions — if the position is there, you're in. If not, refresh and place again.";
   }
@@ -596,8 +599,11 @@ function resolveMarketMeta(
   const directAsset: WindowMarket["asset"] | null = rawAsset === "BTC" || rawAsset === "ETH" ? (rawAsset as "BTC" | "ETH") : null;
   const directExpiry = extractExpiry(market);
   const tradingStart = Number(market?.tradingStart ?? market?.info?.tradingStart ?? 0);
+  // Ignore absurd intervals (e.g. tradingStart=0 → multi-day "3804262s" titles).
+  const candidate =
+    directExpiry && tradingStart > 0 ? directExpiry - tradingStart : Number(market?.intervalSec ?? market?.info?.intervalSec ?? 0);
   const rawInterval =
-    directExpiry && tradingStart ? directExpiry - tradingStart : Number(market?.intervalSec ?? market?.info?.intervalSec ?? 0);
+    Number.isFinite(candidate) && candidate >= 60 && candidate <= 48 * 3600 ? candidate : 0;
   const directTimeframe = intervalToTimeframe(rawInterval);
 
   const symbol = SYMBOL_RE.test(declaredSymbol) ? declaredSymbol : findSymbolLike(market) || declaredSymbol;
@@ -606,7 +612,11 @@ function resolveMarketMeta(
   const asset = directAsset ?? meta?.asset ?? detectAsset(symbol || declaredSymbol);
   const expirySec = directExpiry || meta?.expirySec || 0;
   const now = Date.now() / 1000;
-  const timeframe = directTimeframe || detectTimeframe(expirySec ? expirySec - now : 0, symbol);
+  const secondsLeft = expirySec ? expirySec - now : 0;
+  const timeframe =
+    (directTimeframe && !directTimeframe.endsWith("s") ? directTimeframe : "") ||
+    detectTimeframe(secondsLeft, symbol) ||
+    (directTimeframe || "other");
 
   return { symbol: symbol || declaredSymbol, asset, expirySec, timeframe };
 }
@@ -802,9 +812,15 @@ export async function placeStake(args: {
 }): Promise<{ hash?: string; raw: unknown }> {
   if (isDemoMode()) {
     await new Promise((r) => setTimeout(r, 1500));
-    return { hash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`, raw: { demo: true } };
+    const implied = args.market.impliedUp ?? 0.5;
+    const entry = args.side === "up" ? implied : 1 - implied;
+    return {
+      hash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`,
+      raw: { demo: true, side: args.side, entryProb: entry, marketId: args.market.marketId },
+    };
   }
   if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
+  if (!accountAddress) throw new Error("Connect a wallet (or use ?demo=1) to place a bet.");
   await assertTrading(args.market.marketId);
 
   // Ensure markets are loaded before order creation to avoid "unknown symbol" from SDK
@@ -1226,12 +1242,26 @@ export async function getMarketProbabilityHistory(
       from,
       to,
     });
-    return candles
-      .map((c) => ({
-        t: Number(c.bucketStart) * 1000,
-        probUp: Math.min(1, Math.max(0, Number(c.closePrice) / 10 ** quoteDecimals)),
-      }))
+    const points = candles
+      .map((c) => {
+        const raw = Number(c.closePrice);
+        // Indexer sometimes returns already-normalized 0..1 prices; sometimes fixed-point.
+        const scaled = raw > 1.5 ? raw / 10 ** quoteDecimals : raw;
+        return {
+          t: Number(c.bucketStart) * 1000,
+          probUp: Math.min(1, Math.max(0, scaled)),
+        };
+      })
       .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.probUp));
+    // Align to live Up book when the tape looks inverted (1−p mismatch).
+    const liveUp = market.impliedUp;
+    if (liveUp !== null && Number.isFinite(liveUp) && points.length > 0) {
+      const last = points[points.length - 1].probUp;
+      if (Math.abs(last - (1 - liveUp)) + 0.02 < Math.abs(last - liveUp)) {
+        return points.map((p) => ({ ...p, probUp: 1 - p.probUp }));
+      }
+    }
+    return points;
   } catch {
     return [];
   }
@@ -1256,7 +1286,11 @@ export async function getRecentLeaderboard(
 ): Promise<LeaderboardEntry[]> {
   if (!exchange?.client.listPastBinaryMarkets || !exchange.client.getFills) return [];
   try {
-    const past = await exchange.client.listPastBinaryMarkets({ limit: opts.marketLimit ?? 10 });
+    const past = await withTimeout(
+      exchange.client.listPastBinaryMarkets({ limit: opts.marketLimit ?? 10 }),
+      10000,
+      "Leaderboard markets",
+    );
     const totals = new Map<string, { wins: number; volumeWon: number }>();
 
     for (const m of past) {
@@ -1268,7 +1302,7 @@ export async function getRecentLeaderboard(
 
       let fills: FillShape[] = [];
       try {
-        fills = await exchange.client.getFills(pool, { limit: 200 });
+        fills = await withTimeout(exchange.client.getFills(pool, { limit: 200 }), 6000, "Leaderboard fills");
       } catch {
         continue;
       }

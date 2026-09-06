@@ -111,16 +111,33 @@ export function money(n: number | null | undefined, network: NetworkName, digits
 }
 
 export function formatWindow(tf: string): string {
-  if (tf.endsWith("m")) return `${tf.slice(0, -1)} min`;
+  if (!tf || tf === "other") return "this window";
+  if (tf.endsWith("m")) {
+    const n = tf.slice(0, -1);
+    return n === "1" ? "1 min" : `${n} min`;
+  }
   if (tf.endsWith("h")) {
     const n = tf.slice(0, -1);
     return n === "1" ? "1 hour" : `${n} hours`;
+  }
+  if (tf.endsWith("s")) {
+    const sec = Number(tf.slice(0, -1));
+    if (Number.isFinite(sec) && sec > 0) {
+      if (sec <= 20 * 60) return "15 min";
+      if (sec <= 75 * 60) return "1 hour";
+      const h = Math.round(sec / 3600);
+      if (h >= 1 && h <= 72) return h === 1 ? "1 hour" : `${h} hours`;
+      const m = Math.max(1, Math.round(sec / 60));
+      return `${m} min`;
+    }
   }
   return tf;
 }
 
 export function quoteTicket(side: Side, stake: number, impliedUp: number | null): TicketQuote {
-  const p = impliedUp !== null && impliedUp > 0.02 && impliedUp < 0.98 ? impliedUp : 0.5;
+  // Keep extreme book odds (e.g. 98% Up) — only fall back to 50/50 when unknown.
+  // Contract sizing still clamps to [0.01, 0.99] so stake/price never blows up.
+  const p = impliedUp !== null && Number.isFinite(impliedUp) ? impliedUp : 0.5;
   const entryProb = side === "up" ? p : 1 - p;
   const safeProb = Math.min(0.99, Math.max(0.01, entryProb));
   const contracts = stake / safeProb;

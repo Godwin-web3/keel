@@ -335,18 +335,23 @@ button:disabled {
   display: inline-flex;
 }
 
+.more-menu-wrap.open {
+  z-index: 120;
+}
+
 .menu-catcher {
   position: fixed;
   inset: 0;
-  z-index: 45;
+  z-index: 110;
   background: transparent;
+  cursor: default;
 }
 
 .dropdown-menu {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 46;
+  z-index: 120;
   min-width: 200px;
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -1548,6 +1553,19 @@ th {
 
 .chance-meter {
   flex: none;
+  color: var(--text);
+}
+
+.chance-meter-track {
+  stroke: var(--line-strong);
+}
+
+.chance-meter-arc {
+  stroke: var(--up);
+}
+
+.chance-meter-label {
+  fill: currentColor;
 }
 
 .identicon {
