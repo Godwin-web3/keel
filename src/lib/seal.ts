@@ -9,7 +9,7 @@ import {
   type Hex,
 } from "viem";
 import { KEEL_SEAL_ABI, KEEL_SEAL_BYTECODE } from "./KeelSeal.generated";
-import { getTradeContext } from "./sdk";
+import { getHttpPublicClient, getTradeContext } from "./sdk";
 import type { NetworkName, Side, WindowMarket } from "./types";
 
 export type SealStatus = "sealed" | "revealed" | "refunded" | "placed";
@@ -30,6 +30,8 @@ export type LocalSeal = {
   commitHash?: string;
   revealHash?: string;
   placeHash?: string;
+  /** Shared id when this seal is one leg of a sealed double. */
+  parlayId?: string;
 };
 
 
@@ -165,10 +167,14 @@ async function ensureAllowance(network: NetworkName, spender: Address, need: big
 export async function ensureSealDeployed(network: NetworkName): Promise<Address> {
   const canonical = KEEL_SEAL_ADDRESSES[network];
   if (canonical) {
-    const { publicClient } = await getTradeContext(network);
+    // Code check must use public HTTP RPC — wallet provider on the wrong chain
+    // (or a broken injected RPC) returns 0x and falsely claims the contract is missing.
+    const publicClient = await getHttpPublicClient(network);
     const code = await publicClient.getCode({ address: canonical });
     if (!code || code === "0x") {
-      throw new Error(`Canonical KeelSeal at ${canonical} has no code on ${network}.`);
+      throw new Error(
+        `Canonical KeelSeal at ${canonical} has no code on ${network} (checked via public RPC).`,
+      );
     }
     return canonical;
   }
@@ -197,6 +203,7 @@ export async function commitSeal(args: {
   market: WindowMarket;
   side: Side;
   amount: number;
+  parlayId?: string;
 }): Promise<LocalSeal> {
   if (!canSeal(args.market)) throw new Error("Too close to close to seal this one. Place it in the open, or pick a later window.");
   const { publicClient, walletClient, account } = await getTradeContext(args.network);
@@ -249,6 +256,7 @@ export async function commitSeal(args: {
     revealBy: Number(revealBy),
     status: "sealed",
     commitHash: hash,
+    parlayId: args.parlayId,
   };
   saveSeals(args.network, [row, ...loadSeals(args.network)]);
   return row;

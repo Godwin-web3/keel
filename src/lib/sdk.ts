@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, custom } from "viem";
+import { createPublicClient, createWalletClient, custom, fallback, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
@@ -193,6 +193,23 @@ async function resolveNetworkConfig(network: NetworkName) {
   return { sdk, chain, addresses, indexerUrl, wsRpcUrl };
 }
 
+/**
+ * Dedicated HTTP public client for Somnia reads (code checks, allowances, receipts).
+ * Never use the injected wallet provider for these — wrong chain / broken wallet RPC
+ * returns empty code and falsely looks like a missing contract.
+ */
+export async function getHttpPublicClient(network: NetworkName) {
+  const { chain } = await resolveNetworkConfig(network);
+  if (!chain) throw new Error("Somnia chain not found.");
+  const urls = (chain.rpcUrls?.default?.http ?? []).filter(Boolean) as string[];
+  if (urls.length === 0) throw new Error(`No HTTP RPC configured for ${network}.`);
+  const transport = urls.length === 1 ? http(urls[0]) : fallback(urls.map((u) => http(u)));
+  return createPublicClient({
+    chain: chain as any,
+    transport,
+  });
+}
+
 export async function connectExchange(config: SessionConfig): Promise<void> {
   const fingerprint = `${config.network}:${config.privateKey ? "signed" : "read"}`;
   if (exchange && lastConfig === fingerprint) return;
@@ -266,8 +283,11 @@ export function friendlyWalletError(err: unknown): string {
   if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
   }
-  if (/Wrong network|still not on Somnia|Switch your wallet to Somnia|Couldn't verify the wallet network/i.test(msg)) {
+  if (/Wrong network|still not on Somnia|Switch your wallet to Somnia|Couldn't verify the wallet network|Switch to Somnia/i.test(msg)) {
     return msg.split(/\n/)[0].slice(0, 180);
+  }
+  if (/has no code on/i.test(msg) && /Canonical KeelSeal/i.test(msg)) {
+    return "Couldn't reach KeelSeal on the public RPC. Check your connection and try again — or switch your wallet to Somnia Shannon.";
   }
   if (/user rejected|user denied|rejected the request|ACTION_REJECTED|4001/i.test(msg)) {
     return "Request cancelled in the wallet.";
@@ -423,6 +443,17 @@ export async function getTradeContext(network: NetworkName) {
   const { chain, addresses } = await resolveNetworkConfig(network);
   if (!chain) throw new Error("Somnia chain not found.");
   await prepareProviderForWrite(network);
+  // Prefer an explicit switch prompt over a false "contract missing" from a wrong-chain wallet RPC.
+  try {
+    const hexId = `0x${Number(chain.id).toString(16)}`;
+    const current = await provider.request({ method: "eth_chainId" });
+    if (String(current).toLowerCase() !== hexId.toLowerCase()) {
+      const label = network === "shannon" ? "Somnia Shannon (50312)" : "Somnia Mainnet (5031)";
+      throw new Error(`Switch your wallet to ${label} to continue.`);
+    }
+  } catch (err) {
+    if (err instanceof Error && /Switch your wallet/i.test(err.message)) throw err;
+  }
   const collateral = (addresses.collateral ?? addresses.testUsdc) as `0x${string}` | undefined;
   if (!collateral) throw new Error("No collateral token on this network.");
   const walletClient = createWalletClient({
@@ -430,10 +461,8 @@ export async function getTradeContext(network: NetworkName) {
     chain: chain as any,
     transport: custom(provider),
   });
-  const publicClient = createPublicClient({
-    chain: chain as any,
-    transport: custom(provider),
-  });
+  // Reads + receipt waits go through public HTTP RPCs, not the wallet provider.
+  const publicClient = await getHttpPublicClient(network);
   return { walletClient, publicClient, account: address, collateral };
 }
 
@@ -1073,7 +1102,16 @@ async function redeemOneSide(marketId: string, side: Side, oc: any): Promise<any
 
 export function derivePositions(
   markets: WindowMarket[],
-  journal: { marketId: string; side?: Side; stake?: number; entryProb?: number; kind: string; result?: string }[],
+  journal: {
+    marketId: string;
+    side?: Side;
+    stake?: number;
+    entryProb?: number;
+    kind: string;
+    result?: string;
+    symbol?: string;
+    asset?: WindowMarket["asset"];
+  }[],
 ): {
   open: OpenPosition[];
   claimable: Claimable[];
@@ -1103,13 +1141,24 @@ export function derivePositions(
     const stake = row.stake ?? 0;
     const entryProb = row.entryProb ?? 0.5;
     const contracts = entryProb > 0 ? stake / entryProb : 0;
+    // Prefer live market meta; fall back to journal asset/symbol so Positions
+    // never shows OTHER / "this window" for a known trade whose window rolled off.
+    const symbol = market?.symbol || row.symbol || row.marketId;
+    const asset =
+      (market?.asset && market.asset !== "OTHER" ? market.asset : undefined) ??
+      (row.asset && row.asset !== "OTHER" ? row.asset : undefined) ??
+      detectAsset(symbol);
+    const timeframe =
+      (market?.timeframe && market.timeframe !== "other" ? market.timeframe : undefined) ??
+      detectTimeframe(0, symbol) ??
+      "other";
 
     if (status === "trading" || status === "locked" || status === "listed" || status === "settling") {
       open.push({
         marketId: row.marketId,
-        symbol: market?.symbol ?? row.marketId,
-        asset: market?.asset ?? "OTHER",
-        timeframe: market?.timeframe ?? "other",
+        symbol,
+        asset,
+        timeframe,
         side,
         contracts,
         entryProb,
@@ -1131,9 +1180,9 @@ export function derivePositions(
       if (estimatedPayout > 0) {
         claimable.push({
           marketId: row.marketId,
-          symbol: market?.symbol ?? row.marketId,
-          asset: market?.asset ?? "OTHER",
-          timeframe: market?.timeframe ?? "other",
+          symbol,
+          asset,
+          timeframe,
           side,
           contracts,
           estimatedPayout,

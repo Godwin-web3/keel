@@ -126,7 +126,7 @@ export default function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingBet, setPendingBet] = useState<PendingBet>(null);
   const [parlayOn, setParlayOn] = useState(false);
-  const [sealOn, setSealOn] = useState(false);
+  const [sealOn, setSealOn] = useState(true);
   const [seals, setSeals] = useState<LocalSeal[]>([]);
   const [parlaySideA, setParlaySideA] = useState<Side>("up");
   const [parlaySideB, setParlaySideB] = useState<Side>("down");
@@ -247,6 +247,8 @@ export default function App() {
     setTab("markets");
     if (marketId) {
       setSelectedId(marketId);
+      setParlayOn(false);
+      setSealOn(true);
       if (side) {
         setPendingBet({ kind: "single", side });
         setParlaySideA(side);
@@ -267,6 +269,9 @@ export default function App() {
   function selectMarket(id: string) {
     setSelectedId(id);
     setPendingBet(null);
+    setParlayOn(false);
+    const m = markets.find((row) => row.marketId === id);
+    setSealOn(m ? canSeal(m) : true);
     setMoreOpen(false);
     setBetOpen(true);
   }
@@ -280,6 +285,8 @@ export default function App() {
       return;
     }
     setSelectedId(m.marketId);
+    setParlayOn(false);
+    setSealOn(canSeal(m));
     setPendingBet({ kind: "single", side });
     setMoreOpen(false);
     setBetOpen(true);
@@ -864,6 +871,76 @@ export default function App() {
     }
   }
 
+  /** Two-leg sealed commit — same half/half stake split as open parlay. */
+  async function onSealedParlay(aSide: Side, bSide: Side): Promise<boolean> {
+    if (!selected || !parlayPartner) return false;
+    if (!canSeal(selected) || !canSeal(parlayPartner)) {
+      setMessage({
+        kind: "error",
+        text: "Too close to close to seal both. Place in the open, or pick later windows.",
+      });
+      return false;
+    }
+    const q = quoteParlay(selected, aSide, parlayPartner, bSide, stake);
+    const parlayId = crypto.randomUUID();
+    setBusy(true);
+    setMessage(null);
+    try {
+      const rowA = await commitSeal({
+        network,
+        market: selected,
+        side: aSide,
+        amount: q.legs[0].stake,
+        parlayId,
+      });
+      const rowB = await commitSeal({
+        network,
+        market: parlayPartner,
+        side: bSide,
+        amount: q.legs[1].stake,
+        parlayId,
+      });
+      setSeals(loadSeals(network));
+      appendJournal({
+        kind: "parlay",
+        marketId: selected.marketId,
+        symbol: `${selected.asset}×${parlayPartner.asset}`,
+        asset: selected.asset,
+        stake,
+        parlayId,
+        note: `Sealed double · ${selected.asset} ${aSide === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${bSide === "up" ? "Up" : "Down"} · sides hidden until reveal · ${q.legs[0].stake.toFixed(2)}+${q.legs[1].stake.toFixed(2)} ${coin(network)}`,
+      });
+      for (const [i, row] of [rowA, rowB].entries()) {
+        const m = i === 0 ? selected : parlayPartner;
+        const side = i === 0 ? aSide : bSide;
+        appendJournal({
+          kind: "commit",
+          marketId: m.marketId,
+          symbol: m.symbol,
+          asset: m.asset,
+          side,
+          stake: q.legs[i].stake,
+          hash: row.commitHash,
+          parlayId,
+          note: `Sealed ${m.asset}. Side is hidden on-chain until you reveal.`,
+        });
+      }
+      setJournal(loadJournal());
+      setTab("desk");
+      setMessage({
+        kind: "ok",
+        text: `Sealed both · ${selected.asset} × ${parlayPartner.asset}. Reveal each on Positions.`,
+      });
+      return true;
+    } catch (err) {
+      setSeals(loadSeals(network));
+      setMessage({ kind: "error", text: friendlyWalletError(err) });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function restakeRun(current: RunState, fromMarket: WindowMarket, lastSide: Side, nextStake: number) {
     if (restakingRef.current) return;
     restakingRef.current = true;
@@ -1205,7 +1282,17 @@ export default function App() {
         <div className="confirm-backdrop" onClick={() => closeBetSheet()}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
-              <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm both commitments" : "Confirm") : "Commit"}</h2>
+              <h2>
+                {pendingBet
+                  ? pendingBet.kind === "parlay"
+                    ? sealOn
+                      ? "Confirm sealed double"
+                      : "Confirm both commitments"
+                    : sealOn
+                      ? "Confirm seal"
+                      : "Confirm"
+                  : "Commit"}
+              </h2>
               <button className="ghost" disabled={busy} onClick={() => closeBetSheet()}>
                 Close
               </button>
@@ -1223,26 +1310,28 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={parlayOn}
-                      onChange={(e) => {
-                        setParlayOn(e.target.checked);
-                        if (e.target.checked) setSealOn(false);
-                      }}
+                      onChange={(e) => setParlayOn(e.target.checked)}
                     />
-                    Also bet on {parlayPartner.asset} in the same {formatWindow(parlayPartner.timeframe)}. You only get paid if both are right.
+                    Also {sealOn ? "seal" : "bet"} on {parlayPartner.asset} in the same {formatWindow(parlayPartner.timeframe)}.
+                    {sealOn
+                      ? " Both sides stay hidden until you reveal each."
+                      : " You only get paid if both are right."}
                   </label>
                 )}
-                <label className="parlay-toggle">
-                  <input
-                    type="checkbox"
-                    checked={sealOn && !parlayOn}
-                    onChange={(e) => {
-                      setSealOn(e.target.checked);
-                      if (e.target.checked) setParlayOn(false);
-                    }}
-                    disabled={!canSeal(selected) && !sealOn}
-                  />
-                  Seal (commit–reveal): hide your side on-chain until you Reveal. Not an open DreamDEX position until then.
-                </label>
+                {canSeal(selected) ? (
+                  <label className="parlay-toggle">
+                    <input
+                      type="checkbox"
+                      checked={!sealOn}
+                      onChange={(e) => setSealOn(!e.target.checked)}
+                    />
+                    Place in the open (advanced) — skip commit–reveal; side is visible on DreamDEX immediately.
+                  </label>
+                ) : (
+                  <p className="muted" style={{ marginBottom: 8 }}>
+                    Too close to close to seal — placing in the open.
+                  </p>
+                )}
                 {parlayOn && parlayPartner && (
                   <>
                     <div className="parlay-sides">
@@ -1327,7 +1416,9 @@ export default function App() {
                     >
                       {!signedIn
                         ? "Connect to review"
-                        : `Review ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`}
+                        : sealOn
+                          ? `Seal both · ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`
+                          : `Review ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`}
                     </button>
                   ) : (
                     <>
@@ -1344,7 +1435,7 @@ export default function App() {
                           setPendingBet({ kind: "single", side: "up" });
                         }}
                       >
-                        {!signedIn ? "Connect to bet Up" : "Bet Up"}
+                        {!signedIn ? "Connect to Seal Up" : sealOn ? "Seal Up" : "Place Up"}
                       </button>
                       <button
                         className="down"
@@ -1359,7 +1450,7 @@ export default function App() {
                           setPendingBet({ kind: "single", side: "down" });
                         }}
                       >
-                        {!signedIn ? "Connect to bet Down" : "Bet Down"}
+                        {!signedIn ? "Connect to Seal Down" : sealOn ? "Seal Down" : "Place Down"}
                       </button>
                     </>
                   )}
@@ -1371,7 +1462,7 @@ export default function App() {
                         ? "Connect your wallet to place this."
                         : sealOn
                           ? "Sealing commits your stake now; your side stays hidden until you Reveal on Positions."
-                          : "You only lose what you put in — wrong side returns $0."}
+                          : "Open place — side is visible on DreamDEX immediately. You only lose what you put in."}
                 </p>
               </>
             )}
@@ -1381,6 +1472,7 @@ export default function App() {
                 <p className="muted" style={{ marginBottom: 14 }}>
                   {selected.asset} · {formatWindow(selected.timeframe)} ·{" "}
                   <span className={`confirm-side ${pendingBet.side}`}>{pendingBet.side === "up" ? "Up" : "Down"}</span>
+                  {sealOn ? " · sealed" : " · open"}
                 </p>
                 <div className="ticket-math">
                   <div>
@@ -1421,8 +1513,8 @@ export default function App() {
                           ? "Sealing…"
                           : "Placing…"
                         : sealOn
-                          ? "Seal (hide side)"
-                          : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
+                          ? `Seal ${pendingBet.side === "up" ? "Up" : "Down"}`
+                          : `Place ${pendingBet.side === "up" ? "Up" : "Down"}`}
                   </button>
                   <button className="ghost" disabled={busy} onClick={() => setPendingBet(null)}>
                     Back
@@ -1439,6 +1531,7 @@ export default function App() {
             {pendingBet && pendingBet.kind === "parlay" && parlayPartner && (
               <>
                 <p className="muted" style={{ marginBottom: 14 }}>
+                  {sealOn ? "Sealed double · " : ""}
                   {selected.asset}{" "}
                   <span className={`confirm-side ${pendingBet.a}`}>{pendingBet.a === "up" ? "Up" : "Down"}</span>
                   {" × "}
@@ -1451,14 +1544,23 @@ export default function App() {
                     {money(stake, network)}
                   </div>
                   <div>
-                    <span>If both win</span>
-                    {money(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).redeemIfWin, network)}
+                    <span>{sealOn ? "Stake each leg" : "If both win"}</span>
+                    {sealOn
+                      ? money(stake / 2, network)
+                      : money(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).redeemIfWin, network)}
                   </div>
                   <div>
-                    <span>Chance both win</span>
-                    {Math.round(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).implied * 100)}%
+                    <span>{sealOn ? "Sides until reveal" : "Chance both win"}</span>
+                    {sealOn
+                      ? "Hidden"
+                      : `${Math.round(quoteParlay(selected, pendingBet.a, parlayPartner, pendingBet.b, stake).implied * 100)}%`}
                   </div>
                 </div>
+                {sealOn && (
+                  <p className="muted" style={{ marginBottom: 8 }}>
+                    Stake splits half/half like an open parlay. Each leg is its own seal — reveal and place them separately on Positions.
+                  </p>
+                )}
                 <div className="actions" style={{ marginTop: 16 }}>
                   {message?.kind === "error" && <div className="sheet-error">{message.text}</div>}
                   <button
@@ -1472,12 +1574,20 @@ export default function App() {
                       const a = pendingBet.a;
                       const b = pendingBet.b;
                       void (async () => {
-                        const ok = await onParlay(a, b);
+                        const ok = sealOn ? await onSealedParlay(a, b) : await onParlay(a, b);
                         if (ok) closeBetSheet(true);
                       })();
                     }}
                   >
-                    {!signedIn ? "Connect to confirm" : busy ? "Placing…" : "Confirm both commitments"}
+                    {!signedIn
+                      ? "Connect to confirm"
+                      : busy
+                        ? sealOn
+                          ? "Sealing both…"
+                          : "Placing…"
+                        : sealOn
+                          ? "Seal both"
+                          : "Confirm both commitments"}
                   </button>
                   <button className="ghost" disabled={busy} onClick={() => setPendingBet(null)}>
                     Back
@@ -1615,7 +1725,13 @@ export default function App() {
                         openTicket(m, "up");
                       }}
                     >
-                      {oddsReady ? `Up ${upPct}%` : "Up"}
+                      {live && canSeal(m)
+                        ? oddsReady
+                          ? `Seal Up ${upPct}%`
+                          : "Seal Up"
+                        : oddsReady
+                          ? `Up ${upPct}%`
+                          : "Up"}
                     </button>
                     <button
                       className="pm-down"
@@ -1625,7 +1741,13 @@ export default function App() {
                         openTicket(m, "down");
                       }}
                     >
-                      {oddsReady ? `Down ${100 - upPct!}%` : "Down"}
+                      {live && canSeal(m)
+                        ? oddsReady
+                          ? `Seal Down ${100 - upPct!}%`
+                          : "Seal Down"
+                        : oddsReady
+                          ? `Down ${100 - upPct!}%`
+                          : "Down"}
                     </button>
                   </div>
                   <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
