@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Synced/rendered from docs/sdk-notes.md — keep in sync when docs update. -->
+<title>Keel · SDK &amp; docs feedback</title>
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+  :root {
+    --ink: #0e1116;
+    --mint: #00d4a4;
+    --mint-dim: rgba(0, 212, 164, 0.14);
+    --muted: #8b949e;
+    --line: #1c2128;
+    --card: #151a21;
+    --text: #e6edf3;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: #050608;
+    color: var(--text);
+    font-family: "DM Sans", system-ui, sans-serif;
+    line-height: 1.6;
+  }
+
+  .top {
+    border-bottom: 1px solid var(--line);
+    background: var(--ink);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .top-inner {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .brand {
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    font-weight: 700;
+    color: var(--text);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+  }
+
+  .brand span { color: var(--mint); }
+
+  .top-links {
+    display: flex;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+  }
+
+  .top-links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+
+  .top-links a:hover { color: var(--mint); }
+
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+
+  h1 {
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    font-size: clamp(1.6rem, 4vw, 2.1rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 2.25rem 0 0.85rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+  }
+
+  main > h2:first-of-type {
+    border-top: none;
+    padding-top: 0.5rem;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 1.4rem 0 0.5rem;
+    color: var(--mint);
+  }
+
+  p { margin: 0.65rem 0; color: #c9d1d9; }
+
+  ul, ol {
+    margin: 0.6rem 0 0.6rem 1.25rem;
+    color: #c9d1d9;
+  }
+
+  li { margin: 0.35rem 0; }
+
+  strong { color: var(--text); font-weight: 600; }
+
+  code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.86em;
+    background: var(--mint-dim);
+    color: var(--mint);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+
+  a { color: var(--mint); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 1.75rem 0;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1rem 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.7rem 0.85rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  th {
+    color: var(--mint);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    background: rgba(0,0,0,0.25);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  footer {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 1.25rem 3rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--mint); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="top-inner">
+      <a class="brand" href="/">Keel<span>.</span></a>
+      <div class="top-links">
+        <a href="/pitch-deck.html">Pitch deck</a>
+        <a href="/">App</a>
+        <a href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </div>
+  </div>
+  <main>
+<h1>SDK &amp; docs feedback — <code>@somnia-chain/markets-sdk</code></h1>
+<p>Constructive notes from building <strong>Keel</strong> (consumer Event Contracts UI + commit–reveal escrow) against <code>@somnia-chain/markets-sdk</code> ≥ 0.28.1 on Somnia / DreamDEX.</p>
+<p>Audience: DreamDEX / markets-sdk maintainers. Tone: what worked, what surprised us, and a few concrete doc asks — not a rant.</p>
+<p><strong>Repo:</strong> <a href="https://github.com/Godwin-web3/keel" target="_blank" rel="noreferrer">https://github.com/Godwin-web3/keel</a></p>
+<p><strong>Live:</strong> <a href="https://keel-black-phi.vercel.app" target="_blank" rel="noreferrer">https://keel-black-phi.vercel.app</a></p>
+<p><strong>Event Contracts docs:</strong> <a href="https://docs.dreamdex.io/developers/event-contracts" target="_blank" rel="noreferrer">https://docs.dreamdex.io/developers/event-contracts</a></p>
+<hr />
+<h2>What worked</h2>
+<p>These APIs and shapes carried most of the product:</p>
+<ul>
+<li><strong><code>listLiveBinaryMarkets</code></strong> with typed <code>asset</code> / <code>expiry</code> / <code>tradingStart</code> on the indexer row. Do not parse the question text for those fields.</li>
+<li><strong><code>getMarketOnchain</code></strong> status gating before writes. Indexer lag is real; on-chain status saved us from bad reveals.</li>
+<li><strong><code>trader.redeem({ marketId, market, outcomeToken, outcomeIdx, amount })</code></strong> with <strong><code>getOutcomeBalance({ outcomeToken, account, id })</code></strong> as an object — redeem shapes are clear once you use the object form.</li>
+<li><strong><code>getPortfolio</code> / <code>getClaimable</code></strong> for positions that <code>loadMarkets()</code> will never return (finalized / claimable).</li>
+<li>Unified <strong><code>createOrder</code></strong> on <code>#YES</code> / <code>#NO</code> tradable symbols, IOC — good fit for Event Contract stakes.</li>
+<li><strong><code>watchMarkets({ discover: true })</code></strong> and <strong><code>watchPrice(&quot;BTC&quot;|&quot;ETH&quot;)</code></strong> instead of blasting ~50 order books every 15s. Material for a consumer UI.</li>
+</ul>
+<p>Keel&#x27;s board and claim flow sit on this path end-to-end.</p>
+<hr />
+<h2>Gotchas that still hold</h2>
+<p>Worth putting near the top of any Event Contracts / bot-kit guide:</p>
+<ol>
+<li><strong>Winnings are claimed, not received.</strong> A bot (or UI) that never redeems looks broke. <code>loadMarkets()</code> skips finalized binary markets. Use <code>listBinaryMarkets({ status: &quot;Finalized&quot; })</code>, <code>listPastBinaryMarkets</code>, or <code>getClaimable</code>.</li>
+<li><strong>Losing redeem succeeds and pays 0.</strong> Check the winning outcome before spending gas.</li>
+<li><strong>Voids: redeem both sides</strong> at 0.5. There is no inferred winner.</li>
+<li><strong>Candles and fills are keyed on pool, and pools are recycled.</strong> Scope <code>getCandles</code> with <code>from</code>/<code>to</code> for this market&#x27;s <code>tradingStart</code>–<code>expiry</code>, or you chart the last N windows on a reused pool.</li>
+<li><strong><code>getOutcomeBalance</code> takes <code>{ outcomeToken, account, id }</code>.</strong> Positional arguments throw.</li>
+<li><strong>Down is <code>#NO</code> buy</strong>, not <code>#YES</code> sell, unless you already hold Up inventory.</li>
+<li><strong>SDK 0.28.0+</strong> for tick-grid prices. Below 0.23.0 <code>loadMarkets</code> fails on the dropped <code>longOpenInterest</code> column.</li>
+</ol>
+<hr />
+<h2>Indexer: <code>RegistryMarkets</code> / <code>LiveBinaryMarkets</code> + heavy <code>MarketFields</code></h2>
+<h3>What we hit</h3>
+<p><code>listLiveBinaryMarkets</code> (and related registry loads) often pull a large <strong><code>MarketFields</code></strong> GraphQL fragment — perp / funding / fields Keel never needs for a binary board. Under load that selection <strong>times out</strong> (<code>IndexerError</code> / signal timed out), which takes the whole market list down with it.</p>
+<h3>What Keel does</h3>
+<p>On timeout (or empty live list), Keel falls back to a <strong>lean GraphQL</strong> query against the same indexer: only <code>marketId</code>, <code>asset</code>, <code>expiry</code>, <code>tradingStart</code>, <code>intervalSec</code>, <code>strike</code>, <code>poolAddress</code>, <code>lastPrice</code>, tokens, status, etc. See <code>leanListLiveBinaryMarkets</code> in <code>src/lib/sdk.ts</code>.</p>
+<p>That fallback is enough to paint Markets and drive seal/reveal. We still prefer the SDK path when it returns.</p>
+<h3>Doc ask</h3>
+<p>Call out <strong><code>MarketFields</code> cost</strong> in the indexer / <code>listLiveBinaryMarkets</code> docs: which fields are required for binary Event Contracts vs the full fragment, and that a minimal selection is a supported pattern for consumer UIs. A first-class <code>fields: &quot;lean&quot; | &quot;full&quot;</code> (or a documented lean query) would remove the need for app-side GraphQL.</p>
+<hr />
+<h2>Indexer rows lack ccxt symbols</h2>
+<h3>What we hit</h3>
+<p>Live binary indexer rows expose <code>asset</code> / <code>expiry</code> / <code>tradingStart</code> (great) but <strong>not</strong> the ccxt-style trading symbol string used for books and <code>createOrder</code> (e.g. <code>BTC-0-12AUG26-1600/USDso#YES</code>). Symbol synthesis lives in the trading layer, not the indexer row.</p>
+<h3>What Keel does</h3>
+<ol>
+<li>Build a <strong><code>marketId → trading symbol</code></strong> map from <strong><code>loadMarkets()</code></strong>.</li>
+<li>Join indexer rows by <code>marketId</code>.</li>
+<li>If books are thin, use a validated <strong><code>lastPrice</code></strong> (plausible probability in (0, 1)) as an odds fallback for the chance ring.</li>
+</ol>
+<h3>Doc ask</h3>
+<p>Document <strong>symbol synthesis / <code>marketId</code> join</strong>: how consumer apps should go from <code>listLiveBinaryMarkets</code> → tradable <code>#YES</code>/<code>#NO</code> symbols, and that <code>loadMarkets</code> is the intended join key. Mention <code>lastPrice</code> semantics (fixed-point vs probability) if the indexer exposes it.</p>
+<hr />
+<h2>Wallet provider <code>getCode</code> on the wrong chain ≠ missing contract</h2>
+<h3>What we hit</h3>
+<p>Injected wallet RPCs often answer <strong><code>eth_getCode</code> for the wallet&#x27;s active chain</strong>, not the app&#x27;s selected Shannon/mainnet. A user on Ethereum mainnet in MetaMask gets <code>0x</code> for the Shannon KeelSeal address — which looks exactly like &quot;contract not deployed.&quot;</p>
+<h3>What Keel does</h3>
+<p><strong>Code and read checks for canonical KeelSeal use a public HTTP RPC</strong> for that network (<code>getHttpPublicClient</code>), not the wallet provider. Writes still go through the wallet after the user switches chain.</p>
+<h3>Doc ask</h3>
+<p>In any &quot;verify deployment / getCode&quot; recipe: <strong>use HTTP RPC (or a pinned public client) for reads</strong>; do not treat wallet-provider <code>getCode === 0x</code> as proof the contract is missing when the UI may be on another chain.</p>
+<hr />
+<h2>Consumer path vs bot-kit docs tone</h2>
+<p>Current Event Contracts material reads strongest for <strong>bots / market makers</strong> (discover loops, candles, inventory). Keel is a <strong>consumer</strong> path:</p>
+<p><strong>discover live binaries → IOC stake (or seal → reveal → place) → wait → redeem / claim</strong></p>
+<p>That path is short and deserves a first screen. Bot-kit depth can stay; a parallel &quot;build a simple Event Contracts UI&quot; recipe would have saved us several wrong turns (positional <code>getOutcomeBalance</code>, assuming <code>loadMarkets</code> returns claimables, etc.).</p>
+<h3>Doc ask</h3>
+<p><strong>First-screen consumer recipe</strong> (10–15 lines): list live → resolve symbols → IOC <code>#YES</code>/<code>#NO</code> → <code>getClaimable</code> / redeem object shapes → note indexer lag + <code>getMarketOnchain</code> before writes. Link the bot-kit pages from there, not the other way around.</p>
+<hr />
+<h2>Summary table for maintainers</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Area</th><th>Observation</th><th>Keel mitigation</th><th>Suggested docs / SDK tweak</th></tr></thead>
+<tbody>
+<tr><td>Live list</td><td>Heavy <code>MarketFields</code> → timeouts</td><td>Lean GraphQL fallback</td><td>Document cost; lean fields option</td></tr>
+<tr><td>Symbols</td><td>Indexer lacks ccxt symbols</td><td><code>loadMarkets</code> <code>marketId</code> map + <code>lastPrice</code> odds fallback</td><td>Document join + <code>lastPrice</code> units</td></tr>
+<tr><td>Reads</td><td>Wallet <code>getCode</code> wrong chain</td><td>HTTP RPC for contract presence</td><td>Warn in deploy/verify recipes</td></tr>
+<tr><td>Docs tone</td><td>Bot-kit first</td><td>Consumer flow in app + these notes</td><td>First-screen consumer recipe</td></tr>
+<tr><td>Redeem / claim</td><td>Easy to miss</td><td>Object redeem + <code>getClaimable</code></td><td>Keep gotchas #1–3 prominent</td></tr>
+</tbody></table></div>
+<hr />
+<h2>Thanks</h2>
+<p>Happy to clarify any of the above with a short call or a PR against the docs repo. Keel depends on this SDK staying pleasant for consumer apps as well as bots — the primitives above already work; a little front-loaded guidance would make the next builder faster.</p>
+  </main>
+  <footer>
+    Source of truth: <a href="https://github.com/Godwin-web3/keel/blob/main/docs/sdk-notes.md" target="_blank" rel="noreferrer">docs/sdk-notes.md</a>
+    · <a href="/">Back to Keel</a>
+  </footer>
+</body>
+</html>

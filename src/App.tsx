@@ -1358,6 +1358,28 @@ export default function App() {
                   <div className="dropdown-divider" />
                   <a
                     className="dropdown-item"
+                    href="/pitch-deck.html"
+                    target="_blank"
+                    rel="noreferrer"
+                    role="menuitem"
+                    onClick={() => setMoreOpen(false)}
+                  >
+                    <ExternalLinkIcon />
+                    Pitch deck
+                  </a>
+                  <a
+                    className="dropdown-item"
+                    href="/sdk-notes.html"
+                    target="_blank"
+                    rel="noreferrer"
+                    role="menuitem"
+                    onClick={() => setMoreOpen(false)}
+                  >
+                    <ExternalLinkIcon />
+                    SDK & docs feedback
+                  </a>
+                  <a
+                    className="dropdown-item"
                     href="https://github.com/Godwin-web3/keel"
                     target="_blank"
                     rel="noreferrer"

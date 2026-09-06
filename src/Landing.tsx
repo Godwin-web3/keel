@@ -10,6 +10,8 @@ import type { WindowMarket } from "./lib/types";
 const GITHUB = "https://github.com/Godwin-web3/keel";
 const DREAMDEX_DOCS = "https://docs.dreamdex.io/developers/event-contracts";
 const LIVE_URL = "https://keel-black-phi.vercel.app";
+const PITCH_DECK = "/pitch-deck.html";
+const SDK_NOTES = "/sdk-notes.html";
 const KEEL_SEAL = "0xc77d38feA2d04eF1F1870b5FE1f0Dd5f7B70a1C9";
 const KEEL_SEAL_EXPLORER = `https://shannon-explorer.somnia.network/address/${KEEL_SEAL}`;
 
@@ -97,6 +99,12 @@ export default function Landing({
       <nav className="land-nav">
         <LogoWordmark />
         <div className="land-nav-actions">
+          <a className="land-nav-link" href={PITCH_DECK}>
+            Pitch deck
+          </a>
+          <a className="land-nav-link" href={SDK_NOTES}>
+            SDK notes
+          </a>
           <a className="land-nav-link" href={GITHUB} target="_blank" rel="noreferrer">
             GitHub
           </a>
@@ -326,6 +334,20 @@ export default function Landing({
             </a>
             <p className="land-trust-note">Wallet connect only. Browse markets without connecting.</p>
           </div>
+          <div className="land-trust-card">
+            <p className="land-card-kicker">Docs</p>
+            <a className="land-trust-value land-trust-link" href={PITCH_DECK}>
+              Pitch deck
+              <ExternalLinkIcon size={14} />
+            </a>
+            <p className="land-trust-note">
+              <a className="land-text-link" href={SDK_NOTES}>SDK & docs feedback</a>
+              {" · "}
+              <a className="land-text-link" href={GITHUB} target="_blank" rel="noreferrer">
+                GitHub
+              </a>
+            </p>
+          </div>
         </div>
       </section>
 
@@ -345,6 +367,8 @@ export default function Landing({
       <footer className="landing-footer">
         <span>Keel · Somnia × DreamDEX</span>
         <div className="links">
+          <a href={PITCH_DECK}>Pitch deck</a>
+          <a href={SDK_NOTES}>SDK notes</a>
           <a href={GITHUB} target="_blank" rel="noreferrer">
             GitHub
           </a>
