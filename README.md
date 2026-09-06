@@ -16,9 +16,15 @@ DreamDEX Event Contracts are public: side, size, wallet. Keel acts as an applica
 | **Claim** | Watches settlement and redeems winners. |
 | **Parlay / Run** | Still there. Committed tickets are the default. |
 
-First commit on a network deploys KeelSeal from your wallet, then reuses that address.
+### KeelSeal (Shannon)
 
-Wallet connect only. Browse without connecting.
+Canonical contract (no per-wallet deploy on first commit):
+
+- **Address:** [`0xc77d38feA2d04eF1F1870b5FE1f0Dd5f7B70a1C9`](https://shannon-explorer.somnia.network/address/0xc77d38feA2d04eF1F1870b5FE1f0Dd5f7B70a1C9)
+- **Collateral (tUSDC):** `0x70a86D8842FB63C4Ad2b7cdddF530eBf1BB25d8E`
+- **Deploy tx:** [`0xb7456324821f7a63761085357d9be7b26b2e15d328704c0f2e273fe2e7f88c12`](https://shannon-explorer.somnia.network/tx/0xb7456324821f7a63761085357d9be7b26b2e15d328704c0f2e273fe2e7f88c12)
+
+Mainnet address is unset until deployed. Wallet connect only. Browse without connecting.
 
 ## Stack
 

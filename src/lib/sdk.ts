@@ -267,7 +267,7 @@ export function friendlyWalletError(err: unknown): string {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
   }
   if (/not been authorized|4100|provider is not ready|unauthorized|user rejected/i.test(msg)) {
-    return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. First seal deploys a contract — you need a little STT for gas.";
+    return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. You need a little STT for gas.";
   }
   return msg;
 }
