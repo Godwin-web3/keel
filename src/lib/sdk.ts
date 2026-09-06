@@ -3,6 +3,11 @@ import { privateKeyToAccount } from "viem/accounts";
 import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMarket } from "./types";
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
 
+
+const isDemoMode = () => {
+  try { return window.location.search.includes("demo=1") || (window as any).__KEEL_DEMO_MODE; } catch { return false; }
+};
+
 export type SessionConfig = {
   network: NetworkName;
   privateKey?: string;
@@ -782,6 +787,7 @@ export async function placeStake(args: {
   side: Side;
   stake: number;
 }): Promise<{ hash?: string; raw: unknown }> {
+  if (isDemoMode()) { await new Promise(r => setTimeout(r, 1500)); return { hash: "0x123", raw: {} }; }
   if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
   await assertTrading(args.market.marketId);
 
