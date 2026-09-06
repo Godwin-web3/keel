@@ -41,4 +41,5 @@ npm run dev
 ## Docs
 
 - https://docs.dreamdex.io/developers/event-contracts
-- [SDK notes](./docs/sdk-notes.md)
+- [SDK & docs feedback](./docs/sdk-notes.md) — DoraHacks optional attachment
+- [Pitch deck (HTML)](./docs/pitch-deck.html) · [Pitch deck (Markdown)](./docs/PITCH.md)
