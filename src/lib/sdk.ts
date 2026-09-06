@@ -266,8 +266,26 @@ export function friendlyWalletError(err: unknown): string {
   if (/indexer|RegistryMarkets|signal timed out|timed out/i.test(msg)) {
     return "Market list timed out. That's DreamDEX's indexer, not your wallet RPC. Wait a few seconds and tap Retry — or switch to Wi‑Fi.";
   }
-  if (/not been authorized|4100|provider is not ready|unauthorized|user rejected/i.test(msg)) {
+  if (/Wrong network|still not on Somnia|Switch your wallet to Somnia|Couldn't verify the wallet network/i.test(msg)) {
+    return msg.split(/\n/)[0].slice(0, 180);
+  }
+  if (/user rejected|user denied|rejected the request|ACTION_REJECTED|4001/i.test(msg)) {
+    return "Request cancelled in the wallet.";
+  }
+  if (/not been authorized|4100|provider is not ready|unauthorized/i.test(msg)) {
     return "Wallet blocked the send. In OKX, switch network to Somnia Shannon (chain 50312), stay on this same account, then try again and tap Approve. You need a little STT for gas.";
+  }
+  if (/insufficient funds|exceeds the balance|gas required exceeds/i.test(msg)) {
+    return "Not enough balance for this trade plus gas. Top up and try again.";
+  }
+  if (/ContractFunctionExecutionError|execution reverted|call revert exception|Internal JSON-RPC/i.test(msg)) {
+    return "The network rejected that transaction. Refresh markets and try again — if it keeps failing, the window may have locked.";
+  }
+  // Strip huge viem/SDK dumps down to the first readable sentence.
+  if (msg.length > 180 || /\n\s*Request Arguments|Details:|Version: viem/i.test(msg)) {
+    const first = msg.split(/[\n\r]/).map((s) => s.trim()).find((s) => s && !/^(\s*|Request Arguments|Details:|Version:)/i.test(s));
+    if (first && first.length < 160 && !/0x[a-f0-9]{40}/i.test(first)) return first;
+    return "Something went wrong with the wallet request. Try again — or reconnect and retry.";
   }
   return msg;
 }
@@ -347,8 +365,27 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
 
   try {
     await ensureWalletOnChain(walletClient, chain as any);
-  } catch {
-    /* already on Shannon, or OKX can't switch — still try to trade */
+  } catch (err) {
+    // Chain switch failed or was rejected — do NOT mark the wallet connected.
+    const label = network === "shannon" ? "Somnia Shannon (50312)" : "Somnia Mainnet (5031)";
+    throw new Error(
+      `Wrong network. Switch your wallet to ${label} and try again. ${err instanceof Error ? err.message : ""}`.trim(),
+    );
+  }
+
+  // Double-check the provider is actually on the target chain (some wallets
+  // resolve switchChain without changing networks).
+  try {
+    const hexId = `0x${Number(chain.id).toString(16)}`;
+    const current = await provider.request({ method: "eth_chainId" });
+    if (String(current).toLowerCase() !== hexId.toLowerCase()) {
+      const label = network === "shannon" ? "Somnia Shannon (50312)" : "Somnia Mainnet (5031)";
+      throw new Error(`Wrong network. Your wallet is still not on ${label}. Switch networks, then connect again.`);
+    }
+  } catch (err) {
+    if (err instanceof Error && /Wrong network/i.test(err.message)) throw err;
+    const label = network === "shannon" ? "Somnia Shannon (50312)" : "Somnia Mainnet (5031)";
+    throw new Error(`Couldn't verify the wallet network. Switch to ${label} and try again.`);
   }
 
   const ex = new sdk.SomniaMarkets({
@@ -646,68 +683,80 @@ export async function listWindows(): Promise<WindowMarket[]> {
 
   const now = Date.now() / 1000;
 
+  // Prefer the indexer live list. If it times out or errors, fall through to
+  // the already-loaded ccxt market map instead of failing the whole UI.
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
-    const live = await withTimeout(
-      withRetry(() => exchange!.client.listLiveBinaryMarkets!({ limit: 50 })),
-      12000,
-      "Market list",
-    );
-    const mapped = await Promise.all(
-      live.map(async (m) => {
-        const marketId = String(m.marketId || m.id || "");
-        if (!marketId.startsWith("0x")) return null;
-        let status: MarketStatus = statusFromString(m.status);
-        let statusCode = 1;
-        let isResolved: boolean | undefined;
-        let isVoided: boolean | undefined;
-        let winningOutcome: number | null | undefined;
-        try {
-          const onchain = await withTimeout(
-            exchange!.client.getMarketOnchain(marketId as `0x${string}`),
-            4000,
-            "onchain",
-          );
-          statusCode = Number(onchain.status);
-          status = statusFromCode(statusCode);
-          isResolved = onchain.isResolved;
-          isVoided = onchain.isVoided;
-          winningOutcome = onchain.winningOutcome ?? null;
-        } catch {
-          /* indexer status fallback */
-        }
-        const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
-        const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
-        const { upSymbol, downSymbol } = yesNoSymbols(declaredSymbol, symbol);
-        const secondsLeft = expirySec ? expirySec - now : 0;
-        const book = status === "trading" ? await safeBook(upSymbol || marketId) : { bid: null, ask: null, mid: null };
-        const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
-        const row: WindowMarket = {
-          marketId,
-          symbol: symbol || marketId,
-          upSymbol: upSymbol || marketId,
-          downSymbol,
-          asset,
-          timeframe,
-          expirySec,
-          tradingStartSec,
-          secondsLeft,
-          status,
-          statusCode,
-          isResolved,
-          isVoided,
-          winningOutcome,
-          impliedUp: book.mid,
-          bestBid: book.bid,
-          bestAsk: book.ask,
-          openingPriceLabel: String(m.openingPrice ?? m.strike ?? m.refPrice ?? "window open"),
-          strike: parseStrike(m),
-          poolAddress: poolOf(m),
-          raw: m,
-        };
-        return row;
-      }),
-    );
-    return mapped.filter((row): row is WindowMarket => row !== null).sort((a, b) => a.secondsLeft - b.secondsLeft);
+    try {
+      const live = await withTimeout(
+        withRetry(() => exchange!.client.listLiveBinaryMarkets!({ limit: 50 })),
+        12000,
+        "Market list",
+      );
+      const settled = await Promise.allSettled(
+        live.map(async (m) => {
+          const marketId = String(m.marketId || m.id || "");
+          if (!marketId.startsWith("0x")) return null;
+          let status: MarketStatus = statusFromString(m.status);
+          let statusCode = 1;
+          let isResolved: boolean | undefined;
+          let isVoided: boolean | undefined;
+          let winningOutcome: number | null | undefined;
+          try {
+            const onchain = await withTimeout(
+              exchange!.client.getMarketOnchain(marketId as `0x${string}`),
+              4000,
+              "onchain",
+            );
+            statusCode = Number(onchain.status);
+            status = statusFromCode(statusCode);
+            isResolved = onchain.isResolved;
+            isVoided = onchain.isVoided;
+            winningOutcome = onchain.winningOutcome ?? null;
+          } catch {
+            /* indexer status fallback */
+          }
+          const declaredSymbol = String(m.symbol || m.upSymbol || m.yesSymbol || "");
+          const { symbol, asset, expirySec, timeframe } = resolveMarketMeta(m, declaredSymbol);
+          const { upSymbol, downSymbol } = yesNoSymbols(declaredSymbol, symbol);
+          const secondsLeft = expirySec ? expirySec - now : 0;
+          const book = status === "trading" ? await safeBook(upSymbol || marketId) : { bid: null, ask: null, mid: null };
+          const tradingStartSec = Number(m.tradingStart ?? m.info?.tradingStart ?? 0);
+          const row: WindowMarket = {
+            marketId,
+            symbol: symbol || marketId,
+            upSymbol: upSymbol || marketId,
+            downSymbol,
+            asset,
+            timeframe,
+            expirySec,
+            tradingStartSec,
+            secondsLeft,
+            status,
+            statusCode,
+            isResolved,
+            isVoided,
+            winningOutcome,
+            impliedUp: book.mid,
+            bestBid: book.bid,
+            bestAsk: book.ask,
+            openingPriceLabel: String(m.openingPrice ?? m.strike ?? m.refPrice ?? "window open"),
+            strike: parseStrike(m),
+            poolAddress: poolOf(m),
+            raw: m,
+          };
+          return row;
+        }),
+      );
+      const mapped = settled
+        .map((r) => (r.status === "fulfilled" ? r.value : null))
+        .filter((row): row is WindowMarket => row !== null);
+      if (mapped.length > 0 || live.length === 0) {
+        return mapped.sort((a, b) => a.secondsLeft - b.secondsLeft);
+      }
+      // Indexer returned rows but every enrichment failed — try the loaded map.
+    } catch {
+      /* fall through to loadMarkets path */
+    }
   }
 
   const loaded = Object.values(await exchange.loadMarkets(true));
@@ -732,7 +781,11 @@ export async function listWindows(): Promise<WindowMarket[]> {
     let winningOutcome: number | null | undefined;
     try {
       if (marketId.startsWith("0x")) {
-        const onchain = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
+        const onchain = await withTimeout(
+          exchange.client.getMarketOnchain(marketId as `0x${string}`),
+          4000,
+          "onchain",
+        );
         statusCode = Number(onchain.status);
         status = statusFromCode(statusCode);
         isResolved = onchain.isResolved;

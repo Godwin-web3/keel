@@ -466,7 +466,7 @@ button:disabled {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 40;
+  z-index: 80;
   animation: fadeIn 0.15s ease-out;
 }
 
@@ -523,6 +523,81 @@ button:disabled {
     border-radius: var(--radius);
   }
 }
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 90;
+  padding: 0;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.confirm-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+  animation: slideUp 0.2s ease-out;
+}
+
+.confirm-card.bet-sheet {
+  max-width: 460px;
+}
+
+.confirm-card h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.confirm-card .confirm-side {
+  font-weight: 700;
+}
+
+.confirm-card .confirm-side.up {
+  color: var(--up);
+}
+
+.confirm-card .confirm-side.down {
+  color: var(--down);
+}
+
+@media (min-width: 640px) {
+  .confirm-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+  .confirm-card {
+    border-radius: var(--radius);
+  }
+}
+
+.countdown-ring {
+  flex: none;
+}
+
+.countdown-ring .ring-track {
+  stroke: var(--line);
+}
+
+.countdown-ring .ring-fill {
+  stroke: var(--up);
+  transition: stroke-dashoffset 1s linear;
+}
+
+.countdown-ring.urgent .ring-fill {
+  stroke: var(--down);
+}
+
 
 @keyframes fadeIn {
   from {
@@ -1037,13 +1112,20 @@ th {
 }
 
 .banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  width: min(520px, calc(100vw - 24px));
   font-size: 13px;
   padding: 11px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  margin-bottom: 16px;
   background: var(--bg-3);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.35);
   animation: fadeIn 0.2s ease-out;
+  pointer-events: none;
 }
 
 .tab-enter {
@@ -1427,6 +1509,10 @@ th {
   min-height: 40px;
 }
 
+.feed {
+  margin-bottom: 8px;
+}
+
 .feed-head {
   display: flex;
   align-items: center;
@@ -1566,6 +1652,18 @@ th {
 
 .chance-meter-label {
   fill: currentColor;
+}
+
+:root[data-theme="light"] .chance-meter-track {
+  stroke: rgba(14, 17, 22, 0.2);
+}
+
+:root[data-theme="light"] .chance-meter-arc {
+  stroke: #0f8a56;
+}
+
+:root[data-theme="light"] .chance-meter-label {
+  fill: #0e1116;
 }
 
 .identicon {

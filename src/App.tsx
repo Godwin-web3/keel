@@ -117,6 +117,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [markets, setMarkets] = useState<WindowMarket[]>([]);
+  const [marketsLoaded, setMarketsLoaded] = useState(false);
+  const [marketsError, setMarketsError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [journal, setJournal] = useState<JournalRow[]>([]);
@@ -126,6 +128,7 @@ export default function App() {
   const [parlayOn, setParlayOn] = useState(false);
   const [sealOn, setSealOn] = useState(false);
   const [seals, setSeals] = useState<LocalSeal[]>([]);
+  const [parlaySideA, setParlaySideA] = useState<Side>("up");
   const [parlaySideB, setParlaySideB] = useState<Side>("down");
   const [run, setRun] = useState<RunState | null>(null);
   const [runStake, setRunStake] = useState(10);
@@ -199,6 +202,27 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [moreOpen]);
 
+  // Prevent background scroll while a sheet/menu is open (avoids "stuck" feel).
+  useEffect(() => {
+    if (!walletOpen && !betOpen && !moreOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [walletOpen, betOpen, moreOpen]);
+
+  useEffect(() => {
+    if (!walletOpen && !betOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (betOpen) closeBetSheet();
+      else setWalletOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [walletOpen, betOpen]);
+
   function goTab(next: Tab) {
     setTab(next);
     setMessage(null);
@@ -217,13 +241,18 @@ export default function App() {
     };
   }, []);
 
-  function enterApp(marketId?: string) {
+  function enterApp(marketId?: string, side?: Side) {
     history.pushState(null, "", APP_HASH);
     setEntered(true);
     setTab("markets");
     if (marketId) {
       setSelectedId(marketId);
-      setPendingBet(null);
+      if (side) {
+        setPendingBet({ kind: "single", side });
+        setParlaySideA(side);
+      } else {
+        setPendingBet(null);
+      }
       setBetOpen(true);
     }
   }
@@ -238,6 +267,7 @@ export default function App() {
   function selectMarket(id: string) {
     setSelectedId(id);
     setPendingBet(null);
+    setMoreOpen(false);
     setBetOpen(true);
   }
 
@@ -248,12 +278,14 @@ export default function App() {
     }
     if (!signedIn) {
       setSelectedId(m.marketId);
+      setMoreOpen(false);
       setWalletOpen(true);
       setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
       return;
     }
     setSelectedId(m.marketId);
     setPendingBet({ kind: "single", side });
+    setMoreOpen(false);
     setBetOpen(true);
   }
 
@@ -436,10 +468,15 @@ export default function App() {
     try {
       const rows = await listWindows();
       setMarkets(rows);
+      setMarketsError(null);
+      setMarketsLoaded(true);
       if (walletAddress) void discoverPositions(walletAddress);
       if (!silent) setMessage({ kind: "ok", text: `${rows.length} markets.` });
     } catch (err) {
-      if (!silent) setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      const text = friendlyWalletError(err);
+      setMarketsLoaded(true);
+      setMarketsError(text);
+      if (!silent) setMessage({ kind: "error", text });
     } finally {
       if (silent) refreshingRef.current = false;
       else setBusy(false);
@@ -522,21 +559,36 @@ export default function App() {
 
   async function connectAndLoad(net: NetworkName): Promise<boolean> {
     setBusy(true);
+    setMarketsError(null);
     setMessage({ kind: "ok", text: "Loading markets…" });
     try {
       await connectExchange({ network: net });
       setConnected(true);
       setSignedIn(false);
       setWalletAddress(null);
-      const rows = await listWindows();
-      setMarkets(rows);
-      setMessage({ kind: "ok", text: `${rows.length} markets.` });
+      try {
+        const rows = await listWindows();
+        setMarkets(rows);
+        setMarketsError(null);
+        setMessage({ kind: "ok", text: `${rows.length} markets.` });
+      } catch (err) {
+        // Keep the read connection — Retry should only re-fetch windows.
+        const text = friendlyWalletError(err);
+        setMarketsError(text);
+        setMessage({ kind: "error", text });
+        setMarketsLoaded(true);
+        return false;
+      }
+      setMarketsLoaded(true);
       return true;
     } catch (err) {
       setConnected(false);
+      setMarketsLoaded(true);
+      const text = friendlyWalletError(err);
+      setMarketsError(text);
       setMessage({
         kind: "error",
-        text: friendlyWalletError(err),
+        text,
       });
       return false;
     } finally {
@@ -552,16 +604,29 @@ export default function App() {
       setConnected(true);
       setSignedIn(true);
       setWalletAddress(address);
-      const rows = await listWindows();
-      setMarkets(rows);
-      void discoverPositions(address);
-      setWalletOpen(false);
-      setMessage({
-        kind: "ok",
-        text: `Connected · ${maskKey(address)}. ${rows.length} markets.`,
-      });
+      try {
+        const rows = await listWindows();
+        setMarkets(rows);
+        setMarketsError(null);
+        setMarketsLoaded(true);
+        void discoverPositions(address);
+        setWalletOpen(false);
+        setMessage({
+          kind: "ok",
+          text: `Connected · ${maskKey(address)}. ${rows.length} markets.`,
+        });
+      } catch (err) {
+        setMarketsLoaded(true);
+        const text = friendlyWalletError(err);
+        setMarketsError(text);
+        setWalletOpen(false);
+        setMessage({ kind: "error", text: `Connected · ${maskKey(address)}. Markets: ${text}` });
+      }
       return true;
     } catch (err) {
+      // Wrong-network / rejected connect must NOT leave a signed-in session.
+      setSignedIn(false);
+      setWalletAddress(null);
       setMessage({ kind: "error", text: friendlyWalletError(err) });
       return false;
     } finally {
@@ -584,6 +649,8 @@ export default function App() {
     setWalletAddress(null);
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
+    setMarketsLoaded(false);
+    setMarketsError(null);
     setSelectedId(null);
     void (async () => {
       await connectAndLoad(next);
@@ -597,6 +664,8 @@ export default function App() {
     setWalletAddress(null);
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
+    setMarketsLoaded(false);
+    setMarketsError(null);
     setMessage({ kind: "ok", text: "Disconnected. Nothing you connected with was ever saved anywhere." });
     void (async () => {
       await connectAndLoad(network);
@@ -1013,7 +1082,7 @@ export default function App() {
               {money(totalUnclaimed, network)} to claim
             </button>
           )}
-          <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => setWalletOpen(true)}>
+          <button className={`wallet-trigger ${signedIn ? "signed-in" : "connect-cta"}`} onClick={() => { setMoreOpen(false); setWalletOpen(true); }}>
             {signedIn && walletAddress ? maskKey(walletAddress) : "Connect"}
           </button>
           <button className="theme-trigger" aria-label="Toggle color theme" onClick={toggleTheme}>
@@ -1177,15 +1246,26 @@ export default function App() {
                   Commit this intent. The outcome remains opaque Up or Down until you reveal.
                 </label>
                 {parlayOn && parlayPartner && (
-                  <div className="parlay-sides">
-                    <span className="muted">{parlayPartner.asset} side</span>
-                    <button type="button" className={parlaySideB === "up" ? "up" : "ghost"} onClick={() => setParlaySideB("up")}>
-                      Up
-                    </button>
-                    <button type="button" className={parlaySideB === "down" ? "down" : "ghost"} onClick={() => setParlaySideB("down")}>
-                      Down
-                    </button>
-                  </div>
+                  <>
+                    <div className="parlay-sides">
+                      <span className="muted">{selected.asset} side</span>
+                      <button type="button" className={parlaySideA === "up" ? "up" : "ghost"} onClick={() => setParlaySideA("up")}>
+                        Up
+                      </button>
+                      <button type="button" className={parlaySideA === "down" ? "down" : "ghost"} onClick={() => setParlaySideA("down")}>
+                        Down
+                      </button>
+                    </div>
+                    <div className="parlay-sides">
+                      <span className="muted">{parlayPartner.asset} side</span>
+                      <button type="button" className={parlaySideB === "up" ? "up" : "ghost"} onClick={() => setParlaySideB("up")}>
+                        Up
+                      </button>
+                      <button type="button" className={parlaySideB === "down" ? "down" : "ghost"} onClick={() => setParlaySideB("down")}>
+                        Down
+                      </button>
+                    </div>
+                  </>
                 )}
                 <label className="stake-label">
                   How much ({coin(network)})
@@ -1205,11 +1285,11 @@ export default function App() {
                     <>
                       <div>
                         <span>If both win</span>
-                        {money(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).redeemIfWin, network)}
+                        {money(quoteParlay(selected, parlaySideA, parlayPartner, parlaySideB, stake).redeemIfWin, network)}
                       </div>
                       <div>
                         <span>Chance both win</span>
-                        {Math.round(quoteParlay(selected, "up", parlayPartner, parlaySideB, stake).implied * 100)}%
+                        {Math.round(quoteParlay(selected, parlaySideA, parlayPartner, parlaySideB, stake).implied * 100)}%
                       </div>
                       <div>
                         <span>If you're wrong</span>
@@ -1234,36 +1314,59 @@ export default function App() {
                   )}
                 </div>
                 <div className="actions">
-                  <button
-                    className="up"
-                    disabled={busy || !signedIn || selected.status !== "trading" || selected.impliedUp === null}
-                    onClick={() =>
-                      parlayOn && parlayPartner
-                        ? setPendingBet({ kind: "parlay", a: "up", b: parlaySideB })
-                        : setPendingBet({ kind: "single", side: "up" })
-                    }
-                  >
-                    {selected.impliedUp === null
-                      ? "Loading odds…"
-                      : parlayOn
-                        ? `Up × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}`
-                        : "Bet Up"}
-                  </button>
-                  <button
-                    className="down"
-                    disabled={busy || !signedIn || selected.status !== "trading" || selected.impliedUp === null}
-                    onClick={() =>
-                      parlayOn && parlayPartner
-                        ? setPendingBet({ kind: "parlay", a: "down", b: parlaySideB })
-                        : setPendingBet({ kind: "single", side: "down" })
-                    }
-                  >
-                    {selected.impliedUp === null
-                      ? "Loading odds…"
-                      : parlayOn
-                        ? `Down × ${parlayPartner?.asset} ${parlaySideB === "up" ? "Up" : "Down"}`
-                        : "Bet Down"}
-                  </button>
+                  {parlayOn && parlayPartner ? (
+                    <button
+                      disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                      onClick={() => {
+                        if (!signedIn) {
+                          setMoreOpen(false);
+                          setWalletOpen(true);
+                          setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
+                          return;
+                        }
+                        setPendingBet({ kind: "parlay", a: parlaySideA, b: parlaySideB });
+                      }}
+                    >
+                      {!signedIn
+                        ? "Connect to review"
+                        : selected.impliedUp === null
+                          ? "Loading odds…"
+                          : `Review ${selected.asset} ${parlaySideA === "up" ? "Up" : "Down"} × ${parlayPartner.asset} ${parlaySideB === "up" ? "Up" : "Down"}`}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className="up"
+                        disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                        onClick={() => {
+                          if (!signedIn) {
+                            setMoreOpen(false);
+                            setWalletOpen(true);
+                            setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
+                            return;
+                          }
+                          setPendingBet({ kind: "single", side: "up" });
+                        }}
+                      >
+                        {!signedIn ? "Connect to bet Up" : selected.impliedUp === null ? "Loading odds…" : "Bet Up"}
+                      </button>
+                      <button
+                        className="down"
+                        disabled={busy || selected.status !== "trading" || selected.impliedUp === null}
+                        onClick={() => {
+                          if (!signedIn) {
+                            setMoreOpen(false);
+                            setWalletOpen(true);
+                            setMessage({ kind: "error", text: "Connect a wallet to place a bet." });
+                            return;
+                          }
+                          setPendingBet({ kind: "single", side: "down" });
+                        }}
+                      >
+                        {!signedIn ? "Connect to bet Down" : selected.impliedUp === null ? "Loading odds…" : "Bet Down"}
+                      </button>
+                    </>
+                  )}
                 </div>
                 <p className="muted" style={{ marginTop: 12 }}>
                   {selected.status !== "trading"
@@ -1302,7 +1405,7 @@ export default function App() {
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
                     className={pendingBet.side}
-                    disabled={busy || !signedIn || selected.impliedUp === null}
+                    disabled={busy || selected.impliedUp === null}
                     onClick={() => {
                       if (!signedIn) {
                         setWalletOpen(true);
@@ -1358,7 +1461,7 @@ export default function App() {
                 </div>
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
-                    disabled={busy || !signedIn}
+                    disabled={busy}
                     onClick={() => {
                       if (!signedIn) {
                         setWalletOpen(true);
@@ -1448,7 +1551,7 @@ export default function App() {
               ))}
             </div>
           </div>
-          {!busy && !connected && (
+          {!busy && marketsLoaded && (marketsError || (!connected && markets.length === 0)) && (
             <p className="muted">
               Couldn't load markets.{" "}
               <button className="ghost" onClick={() => void connectAndLoad(network)}>
@@ -1456,7 +1559,7 @@ export default function App() {
               </button>
             </p>
           )}
-          {busy && markets.length === 0 && (
+          {(busy || !marketsLoaded) && markets.length === 0 && (
             <div className="pm-grid">
               {[0, 1, 2, 3].map((i) => (
                 <div key={i} className="pm-card skeleton-card">
@@ -1467,7 +1570,7 @@ export default function App() {
               ))}
             </div>
           )}
-          {!busy && connected && feedMarkets.length === 0 && (
+          {!busy && marketsLoaded && !marketsError && connected && feedMarkets.length === 0 && (
             <p className="muted">No markets right now. Try again in a bit.</p>
           )}
           <div className="pm-grid tab-enter">
