@@ -54,7 +54,7 @@ import {
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
-import { canSeal, commitSeal, loadSeals, markSealPlaced, refundSeal, revealSeal, type LocalSeal } from "./lib/seal";
+import { canSeal, commitSeal, getSealAddress, KEEL_SEAL_ADDRESSES, loadSeals, markSealPlaced, refundSeal, revealSeal, type LocalSeal } from "./lib/seal";
 import PriceChart from "./PriceChart";
 import Landing from "./Landing";
 import RunCard from "./RunCard";
@@ -81,6 +81,20 @@ const KIND_LABEL: Record<JournalRow["kind"], string> = {
 
 type Theme = "light" | "dark";
 const THEME_KEY = "keel.theme";
+const SEAL_PRIMER_KEY = "keel.sealPrimer.dismissed.v1";
+const SHANNON_EXPLORER = "https://shannon-explorer.somnia.network";
+
+function sealExplorerUrl(addr: string): string {
+  return `${SHANNON_EXPLORER}/address/${addr}`;
+}
+
+function readSealPrimerOpen(): boolean {
+  try {
+    return localStorage.getItem(SEAL_PRIMER_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
 
 function getStoredTheme(): Theme | null {
   try {
@@ -140,6 +154,7 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [theme, setTheme] = useState<Theme | null>(() => getStoredTheme());
   const [moreOpen, setMoreOpen] = useState(false);
+  const [sealPrimerOpen, setSealPrimerOpen] = useState(readSealPrimerOpen);
   const [chartPoints, setChartPoints] = useState<ProbabilityPoint[]>([]);
   const [sparks, setSparks] = useState<Record<string, ProbabilityPoint[]>>({});
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
@@ -179,6 +194,31 @@ export default function App() {
     } catch {
       /* private browsing or storage disabled — the toggle still works for this session */
     }
+  }
+
+  function dismissSealPrimer() {
+    setSealPrimerOpen(false);
+    try {
+      localStorage.setItem(SEAL_PRIMER_KEY, "1");
+    } catch {
+      /* private browsing — dismiss for this session only */
+    }
+  }
+
+  function openSealBothTicket(m: WindowMarket) {
+    if (!signedIn) {
+      setSelectedId(m.marketId);
+      setMoreOpen(false);
+      setWalletOpen(true);
+      setMessage({ kind: "error", text: "Connect a wallet to seal." });
+      return;
+    }
+    setSelectedId(m.marketId);
+    setSealOn(canSeal(m));
+    setParlayOn(true);
+    setPendingBet(null);
+    setMoreOpen(false);
+    setBetOpen(true);
   }
 
   useEffect(() => {
@@ -1186,7 +1226,39 @@ export default function App() {
                     if (e.key === "Escape") setMoreOpen(false);
                   }}
                 />
-                <div className="dropdown-menu" role="menu">
+                <div className="dropdown-menu dropdown-menu--trust" role="menu">
+                  <div className="dropdown-blurb">
+                    <strong>What is Keel?</strong>
+                    <p>
+                      Commit–reveal for DreamDEX Event Contracts. Seal hides your side on-chain until
+                      you reveal — then it places. Miss the deadline and you refund.
+                    </p>
+                  </div>
+                  <div className="dropdown-divider" />
+                  <div className="dropdown-meta">
+                    <span className="dropdown-meta-label">Network</span>
+                    <span>{network === "shannon" ? "Shannon (practice · tUSDC)" : "Somnia mainnet (USDso)"}</span>
+                  </div>
+                  {(() => {
+                    const sealAddr = getSealAddress(network) ?? KEEL_SEAL_ADDRESSES.shannon;
+                    if (!sealAddr) return null;
+                    return (
+                      <div className="dropdown-meta">
+                        <span className="dropdown-meta-label">KeelSeal</span>
+                        <a
+                          className="dropdown-meta-link"
+                          href={sealExplorerUrl(sealAddr)}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setMoreOpen(false)}
+                        >
+                          {shorten(sealAddr, 4)}
+                          <ExternalLinkIcon size={12} />
+                        </a>
+                      </div>
+                    );
+                  })()}
+                  <div className="dropdown-divider" />
                   <a
                     className="dropdown-item"
                     href="https://github.com/Godwin-web3/keel"
@@ -1266,10 +1338,26 @@ export default function App() {
               </>
             )}
 
+            <div className="wallet-trust">
+              <p className="wallet-trust-title">Keel on {network === "shannon" ? "Shannon" : "mainnet"}</p>
+              <p className="muted">
+                Seal is the default path: commit stake with the side hidden, reveal to place on DreamDEX,
+                or miss the window and refund. Practice uses tUSDC on Shannon.
+              </p>
+              {(() => {
+                const sealAddr = getSealAddress(network) ?? KEEL_SEAL_ADDRESSES.shannon;
+                if (!sealAddr) return null;
+                return (
+                  <a className="repo-link" href={sealExplorerUrl(sealAddr)} target="_blank" rel="noreferrer">
+                    KeelSeal {shorten(sealAddr, 4)}
+                  </a>
+                );
+              })()}
+            </div>
             <div className="muted" style={{ marginTop: 12 }}>
               {!signedIn &&
                 (connected
-                  ? "Looking around — connect a wallet to commit."
+                  ? "Looking around — connect a wallet to seal."
                   : busy
                     ? "Loading markets..."
                     : "You can look around without a wallet.")}
@@ -1319,14 +1407,25 @@ export default function App() {
                   </label>
                 )}
                 {canSeal(selected) ? (
-                  <label className="parlay-toggle">
-                    <input
-                      type="checkbox"
-                      checked={!sealOn}
-                      onChange={(e) => setSealOn(!e.target.checked)}
-                    />
-                    Place in the open (advanced) — skip commit–reveal; side is visible on DreamDEX immediately.
-                  </label>
+                  <>
+                    {sealOn && (
+                      <div className="seal-story">
+                        <p className="seal-story-kicker">Sealed by default</p>
+                        <p>
+                          Side stays hidden on-chain until you Reveal on Positions. Miss the deadline and
+                          the stake refunds — the outcome was never shown.
+                        </p>
+                      </div>
+                    )}
+                    <label className="parlay-toggle parlay-toggle--advanced">
+                      <input
+                        type="checkbox"
+                        checked={!sealOn}
+                        onChange={(e) => setSealOn(!e.target.checked)}
+                      />
+                      Place in the open (advanced) — skip commit–reveal; side is visible on DreamDEX immediately.
+                    </label>
+                  </>
                 ) : (
                   <p className="muted" style={{ marginBottom: 8 }}>
                     Too close to close to seal — placing in the open.
@@ -1474,6 +1573,14 @@ export default function App() {
                   <span className={`confirm-side ${pendingBet.side}`}>{pendingBet.side === "up" ? "Up" : "Down"}</span>
                   {sealOn ? " · sealed" : " · open"}
                 </p>
+                {sealOn && (
+                  <div className="seal-story seal-story--compact">
+                    <p>
+                      Commit now — side hidden until Reveal. After reveal, Keel places on DreamDEX. Miss
+                      the window → refund.
+                    </p>
+                  </div>
+                )}
                 <div className="ticket-math">
                   <div>
                     <span>You put in</span>
@@ -1557,9 +1664,13 @@ export default function App() {
                   </div>
                 </div>
                 {sealOn && (
-                  <p className="muted" style={{ marginBottom: 8 }}>
-                    Stake splits half/half like an open parlay. Each leg is its own seal — reveal and place them separately on Positions.
-                  </p>
+                  <div className="seal-story seal-story--compact">
+                    <p className="seal-story-kicker">Sealed double</p>
+                    <p>
+                      Stake splits half/half like a parlay. Each leg is its own seal — reveal and place
+                      them separately on Positions. Miss a reveal → that leg refunds.
+                    </p>
+                  </div>
                 )}
                 <div className="actions" style={{ marginTop: 16 }}>
                   {message?.kind === "error" && <div className="sheet-error">{message.text}</div>}
@@ -1655,7 +1766,10 @@ export default function App() {
       {tab === "markets" && (
         <section className="feed">
           <div className="feed-head">
-            <h1>Markets</h1>
+            <div className="feed-head-copy">
+              <h1>Markets</h1>
+              <p className="feed-sub">Live Event Contract windows — seal hides your side until reveal.</p>
+            </div>
             <div className="asset-chips">
               {(["ALL", "BTC", "ETH"] as const).map((a) => (
                 <button key={a} className={assetFilter === a ? "on" : ""} onClick={() => setAssetFilter(a)}>
@@ -1664,13 +1778,42 @@ export default function App() {
               ))}
             </div>
           </div>
+          <div className="seal-default-row" aria-label="Sealed by default">
+            <span className="seal-default-pill">Sealed by default</span>
+            <span className="muted seal-default-hint">Commit → Hold → Reveal → Claim · Place in the open stays advanced</span>
+          </div>
+          {sealPrimerOpen && (
+            <aside className="seal-primer" role="note">
+              <div className="seal-primer-copy">
+                <p className="seal-primer-kicker">How sealing works</p>
+                <ol className="seal-primer-steps">
+                  <li>
+                    <strong>Commit</strong> — stake on-chain; observers see a seal, not Up or Down.
+                  </li>
+                  <li>
+                    <strong>Hold</strong> — KeelSeal escrows until you reveal or the deadline passes.
+                  </li>
+                  <li>
+                    <strong>Reveal</strong> — unseal, then place on DreamDEX from Positions.
+                  </li>
+                  <li>
+                    <strong>Claim</strong> — miss the window → refund; winners redeem after settlement.
+                  </li>
+                </ol>
+              </div>
+              <button type="button" className="ghost seal-primer-dismiss" onClick={dismissSealPrimer}>
+                Got it
+              </button>
+            </aside>
+          )}
           {!busy && marketsLoaded && (marketsError || (!connected && markets.length === 0)) && (
-            <p className="muted">
-              {marketsError ?? "Couldn't load markets."}{" "}
+            <div className="feed-empty">
+              <p className="feed-empty-title">Markets didn't load</p>
+              <p className="muted">{marketsError ?? "Couldn't reach DreamDEX right now."}</p>
               <button className="ghost" onClick={() => void connectAndLoad(network)}>
                 Retry
               </button>
-            </p>
+            </div>
           )}
           {(busy || !marketsLoaded) && markets.length === 0 && (
             <div className="pm-grid">
@@ -1684,7 +1827,13 @@ export default function App() {
             </div>
           )}
           {!busy && marketsLoaded && !marketsError && connected && feedMarkets.length === 0 && (
-            <p className="muted">No markets right now. Try again in a bit.</p>
+            <div className="feed-empty">
+              <p className="feed-empty-title">No live windows</p>
+              <p className="muted">Nothing trading in this filter. Check back shortly, or switch BTC / ETH.</p>
+              <button className="ghost" onClick={() => void connectAndLoad(network)}>
+                Retry
+              </button>
+            </div>
           )}
           <div className="pm-grid tab-enter">
             {feedMarkets.slice(0, 24).map((m) => {
@@ -1692,6 +1841,8 @@ export default function App() {
               const secondsLeft = m.expirySec ? m.expirySec - nowMs / 1000 : m.secondsLeft;
               const live = m.status === "trading";
               const oddsReady = upPct !== null;
+              const partner = findParlayPartner(m, markets);
+              const canSealBoth = Boolean(partner && live && canSeal(m) && canSeal(partner));
               return (
                 <article
                   key={m.marketId}
@@ -1704,6 +1855,7 @@ export default function App() {
                       <p className="pm-kicker">
                         {live && <span className="live-pip" />}
                         {m.asset} · {formatWindow(m.timeframe)}
+                        {live && canSeal(m) && <span className="pm-seal-tag">Seal</span>}
                       </p>
                       <h3>Will {m.asset} go up in the next {formatWindow(m.timeframe)}?</h3>
                     </div>
@@ -1750,6 +1902,18 @@ export default function App() {
                           : "Down"}
                     </button>
                   </div>
+                  {canSealBoth && partner && (
+                    <button
+                      type="button"
+                      className="pm-seal-both"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openSealBothTicket(m);
+                      }}
+                    >
+                      Seal both · {m.asset} × {partner.asset}
+                    </button>
+                  )}
                   <p className="pm-meta">{formatCloseLabel(m.expirySec, secondsLeft)}</p>
                 </article>
               );
@@ -1762,47 +1926,64 @@ export default function App() {
         <div className="grid tab-enter desk-page">
           <section className="card desk-card">
             <h2>Positions</h2>
-            {seals.some((s) => s.status === "sealed") && (
-              <div className="desk-section">
+            <p className="desk-lede">
+              Sealed tickets first — reveal to place on DreamDEX, or refund if you miss the window. Open
+              fills and claims sit below.
+            </p>
+            <div className="desk-section desk-section--sealed">
+              <div className="desk-section-head">
                 <h3 className="muted">Sealed</h3>
-                <p className="desk-section-note">
-                  Hidden on-chain. Reveal to place on DreamDEX. Miss the window and the stake returns.
+                {seals.some((s) => s.status === "sealed") && (
+                  <span className="desk-count">{seals.filter((s) => s.status === "sealed").length}</span>
+                )}
+              </div>
+              <p className="desk-section-note">
+                Hidden on-chain until you reveal. Reveal places on DreamDEX. Miss the deadline → refund.
+              </p>
+              {!seals.some((s) => s.status === "sealed") ? (
+                <p className="desk-empty desk-empty--teach">
+                  No seals yet. From Markets, Seal Up or Down — your side stays private until you reveal
+                  here.
                 </p>
-                {seals
+              ) : (
+                seals
                   .filter((s) => s.status === "sealed")
                   .map((s) => {
                     const left = s.revealBy - nowMs / 1000;
                     const late = left <= 0;
+                    const mins = Math.max(0, Math.floor(left / 60));
+                    const secs = Math.max(0, Math.floor(left % 60));
                     return (
-                      <div key={s.id} className="market">
+                      <div key={s.id} className={`market seal-row ${late ? "late" : ""}`}>
                         <div className="market-top">
                           <strong className="market-name">
                             <span className="asset-icon">{ASSET_ICON[s.asset]}</span>
                             {s.asset}{" "}
                             <span className="muted">
                               · {formatWindow(s.timeframe)} · {s.side === "up" ? "Up" : "Down"} · {money(s.amount, network)}
+                              {s.parlayId ? " · double" : ""}
                             </span>
                           </strong>
                           {late ? (
-                            <button disabled={busy || !signedIn} onClick={() => void onRefundSeal(s)}>
-                              Get money back
+                            <button className="seal-cta refund" disabled={busy || !signedIn} onClick={() => void onRefundSeal(s)}>
+                              Refund
                             </button>
                           ) : (
-                            <button disabled={busy || !signedIn} onClick={() => void onReveal(s)}>
+                            <button className="seal-cta reveal" disabled={busy || !signedIn} onClick={() => void onReveal(s)}>
                               Reveal
                             </button>
                           )}
                         </div>
-                        <div className="muted">
+                        <div className={`seal-countdown ${late ? "late" : ""}`}>
                           {late
-                            ? "Time to reveal has passed. The side was never shown."
-                            : `Reveal in the next ${Math.max(0, Math.floor(left / 60))}m ${String(Math.max(0, Math.floor(left % 60))).padStart(2, "0")}s`}
+                            ? "Reveal window closed — side was never shown. Claim your refund."
+                            : `Reveal within ${mins}m ${String(secs).padStart(2, "0")}s or refund.`}
                         </div>
                       </div>
                     );
-                  })}
-              </div>
-            )}
+                  })
+              )}
+            </div>
             <div className="desk-toolbar">
               <label className="muted desk-autoclose">
                 <input
@@ -1830,7 +2011,7 @@ export default function App() {
             <div className="desk-section">
               <h3 className="muted">Open</h3>
               {open.length === 0 ? (
-                <p className="desk-empty">No open positions — filled bets stay here until settlement.</p>
+                <p className="desk-empty">No open fills yet. After you reveal a seal (or place in the open), live tickets land here until settlement.</p>
               ) : (
                 open.map((p) => (
                   <div key={p.marketId + p.side} className="market">
@@ -1859,9 +2040,9 @@ export default function App() {
               )}
             </div>
             <div className="desk-section">
-              <h3 className="muted">Ready to claim</h3>
+              <h3 className="muted">Claim</h3>
               {claimable.length === 0 ? (
-                <p className="desk-empty">Nothing to collect yet.</p>
+                <p className="desk-empty">Nothing to claim yet. Settled winners show up here — or turn on auto-claim above.</p>
               ) : (
                 claimable.map((c) => (
                   <div key={`${c.marketId}:${c.side}`} className="market">
@@ -1962,7 +2143,7 @@ export default function App() {
               {leaderboardBusy ? "Loading…" : "Refresh"}
             </button>
           </div>
-          <p className="muted lb-note">Who won recently — people who picked the right side.</p>
+          <p className="muted lb-note">Recent winners on DreamDEX windows — rank and PnL, not a raw address dump.</p>
           <div className="lb-table">
             <div className="lb-cols">
               <span>Rank</span>
