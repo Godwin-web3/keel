@@ -4,14 +4,6 @@ import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMa
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
 
 
-export const isDemoMode = (): boolean => {
-  try {
-    return window.location.search.includes("demo=1") || Boolean((window as any).__KEEL_DEMO_MODE);
-  } catch {
-    return false;
-  }
-};
-
 export type SessionConfig = {
   network: NetworkName;
   privateKey?: string;
@@ -266,7 +258,7 @@ function getInjectedProvider(): InjectedProvider | null {
 export function friendlyWalletError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/createTrader|is authenticated|construct SomniaMarkets|privateKey \/ account \/ walletClient|walletClient/i.test(msg)) {
-    return "Connect a wallet (or open with ?demo=1) to place this bet.";
+    return "Connect a wallet to place this bet.";
   }
   if (/Failed to fetch dynamically imported module|placeBinaryOrder reverted|TransactionReceiptNotFoundError/i.test(msg)) {
     return "The wallet signed. Keel didn't get the receipt back. Check Positions — if the position is there, you're in. If not, refresh and place again.";
@@ -810,17 +802,8 @@ export async function placeStake(args: {
   side: Side;
   stake: number;
 }): Promise<{ hash?: string; raw: unknown }> {
-  if (isDemoMode()) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const implied = args.market.impliedUp ?? 0.5;
-    const entry = args.side === "up" ? implied : 1 - implied;
-    return {
-      hash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`,
-      raw: { demo: true, side: args.side, entryProb: entry, marketId: args.market.marketId },
-    };
-  }
   if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
-  if (!accountAddress) throw new Error("Connect a wallet (or use ?demo=1) to place a bet.");
+  if (!accountAddress) throw new Error("Connect a wallet to place a bet.");
   await assertTrading(args.market.marketId);
 
   // Ensure markets are loaded before order creation to avoid "unknown symbol" from SDK
@@ -917,11 +900,6 @@ export async function redeemMarket(
   marketId: string,
   side: Side,
 ): Promise<{ hash?: string; hashes: string[]; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
-  if (isDemoMode()) {
-    await new Promise((r) => setTimeout(r, 1200));
-    const hash = `0xdemo${Date.now().toString(16).padStart(56, "0")}`;
-    return { hash, hashes: [hash], result: "win", raw: { demo: true, marketId, side } };
-  }
   if (!exchange) throw new Error("Exchange is not connected.");
 
   const oc = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
