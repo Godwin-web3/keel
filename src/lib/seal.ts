@@ -176,16 +176,24 @@ export async function commitSeal(args: {
 }): Promise<LocalSeal> {
   if (isDemoMode()) {
     await delay(2000);
-    const id = String(Math.floor(Math.random() * 1000000));
-    const amountWei = "10000000000000000000";
+    const id = String(Math.floor(Math.random() * 1_000_000));
+    const decimals = args.network === "mainnet" ? 18 : 6;
+    const amountWei = parseUnits(String(args.amount), decimals).toString();
     const salt = makeSalt();
     const row: LocalSeal = {
-      id, chainId: "0x1234567890123456789012345678901234567890" as Address,
-      marketId: args.market.marketId, symbol: args.market.symbol,
-      asset: args.market.asset, timeframe: args.market.timeframe,
-      side: args.side, amount: args.amount, amountWei, salt,
-      revealBy: sealDeadline(args.market), status: "sealed",
-      commitHash: "0x" + Array(64).fill(0).map(() => Math.floor(Math.random()*16).toString(16)).join(""),
+      id,
+      chainId: "0xDe00000000000000000000000000000000000001" as Address,
+      marketId: args.market.marketId,
+      symbol: args.market.symbol,
+      asset: args.market.asset,
+      timeframe: args.market.timeframe,
+      side: args.side,
+      amount: args.amount,
+      amountWei,
+      salt,
+      revealBy: sealDeadline(args.market),
+      status: "sealed",
+      commitHash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`,
     };
     saveSeals(args.network, [row, ...loadSeals(args.network)]);
     return row;

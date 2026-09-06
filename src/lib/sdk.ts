@@ -4,8 +4,12 @@ import type { Claimable, MarketStatus, NetworkName, OpenPosition, Side, WindowMa
 import { detectAsset, detectTimeframe, statusFromCode, statusFromString } from "./format";
 
 
-const isDemoMode = () => {
-  try { return window.location.search.includes("demo=1") || (window as any).__KEEL_DEMO_MODE; } catch { return false; }
+export const isDemoMode = (): boolean => {
+  try {
+    return window.location.search.includes("demo=1") || Boolean((window as any).__KEEL_DEMO_MODE);
+  } catch {
+    return false;
+  }
 };
 
 export type SessionConfig = {
@@ -185,10 +189,11 @@ export function maskKey(key: string): string {
 
 async function resolveNetworkConfig(network: NetworkName) {
   const sdk = await import("@somnia-chain/markets-sdk");
-  const chainMod = await import("@somnia-chain/markets-sdk/chains").catch(() => null);
+  const chainMod = await import("@somnia-chain/markets-sdk/chains");
 
   const isTest = network === "shannon";
-  const chain = (isTest ? chainMod?.somniaShannon ?? sdk.somniaShannon : chainMod?.somniaMainnet ?? sdk.somniaMainnet) ?? undefined;
+  const chain = isTest ? chainMod.somniaShannon : chainMod.somniaMainnet;
+  if (!chain) throw new Error("Somnia chain definition not found in the SDK.");
   const addresses = isTest ? sdk.SOMNIA_TESTNET_ADDRESSES : sdk.SOMNIA_MAINNET_ADDRESSES;
   const indexerUrl = isTest ? "https://dev.smk.somnia.host/v1/graphql" : "https://prd.smk.somnia.host/v1/graphql";
   const wsRpcUrl = isTest ? "wss://dream-rpc.somnia.network/ws" : "wss://api.infra.mainnet.somnia.network/ws";
@@ -202,7 +207,13 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
 
   const { sdk, chain, addresses, indexerUrl, wsRpcUrl } = await resolveNetworkConfig(config.network);
 
-  const opts: Record<string, unknown> = {
+  const opts: {
+    indexerUrl: string;
+    chain: typeof chain;
+    wsRpcUrl: string;
+    addresses: typeof addresses;
+    privateKey?: `0x${string}`;
+  } = {
     indexerUrl,
     chain,
     wsRpcUrl,
@@ -216,10 +227,11 @@ export async function connectExchange(config: SessionConfig): Promise<void> {
     accountAddress = null;
   }
 
-  exchange = new sdk.SomniaMarkets(opts) as unknown as Exchange;
+  const ex = new sdk.SomniaMarkets(opts) as unknown as Exchange;
+  exchange = ex;
   lastConfig = fingerprint;
   try {
-    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+    await withTimeout(withRetry(() => ex.loadMarkets(true)), 12000, "Market list");
   } catch {
     /* indexer can still list windows if the chain socket is slow */
   }
@@ -344,17 +356,18 @@ export async function connectInjectedWallet(network: NetworkName): Promise<`0x${
     /* already on Shannon, or OKX can't switch — still try to trade */
   }
 
-  exchange = new sdk.SomniaMarkets({
+  const ex = new sdk.SomniaMarkets({
     indexerUrl,
     chain,
     wsRpcUrl,
     addresses,
     walletClient,
   }) as unknown as Exchange;
+  exchange = ex;
   lastConfig = `${network}:injected:${address.toLowerCase()}`;
   accountAddress = address;
   try {
-    await withTimeout(withRetry(() => exchange.loadMarkets(true)), 12000, "Market list");
+    await withTimeout(withRetry(() => ex.loadMarkets(true)), 12000, "Market list");
   } catch {
     /* still list from indexer */
   }
@@ -633,7 +646,7 @@ export async function listWindows(): Promise<WindowMarket[]> {
 
   if (typeof exchange.client.listLiveBinaryMarkets === "function") {
     const live = await withTimeout(
-      withRetry(() => exchange.client.listLiveBinaryMarkets!({ limit: 50 })),
+      withRetry(() => exchange!.client.listLiveBinaryMarkets!({ limit: 50 })),
       12000,
       "Market list",
     );
@@ -787,7 +800,10 @@ export async function placeStake(args: {
   side: Side;
   stake: number;
 }): Promise<{ hash?: string; raw: unknown }> {
-  if (isDemoMode()) { await new Promise(r => setTimeout(r, 1500)); return { hash: "0x123", raw: {} }; }
+  if (isDemoMode()) {
+    await new Promise((r) => setTimeout(r, 1500));
+    return { hash: `0xdemo${Date.now().toString(16).padStart(56, "0")}`, raw: { demo: true } };
+  }
   if (!exchange) throw new Error("Exchange is not connected. Connect a wallet first.");
   await assertTrading(args.market.marketId);
 
@@ -885,6 +901,11 @@ export async function redeemMarket(
   marketId: string,
   side: Side,
 ): Promise<{ hash?: string; hashes: string[]; result: "win" | "loss" | "void" | "pending"; raw: unknown }> {
+  if (isDemoMode()) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const hash = `0xdemo${Date.now().toString(16).padStart(56, "0")}`;
+    return { hash, hashes: [hash], result: "win", raw: { demo: true, marketId, side } };
+  }
   if (!exchange) throw new Error("Exchange is not connected.");
 
   const oc = await exchange.client.getMarketOnchain(marketId as `0x${string}`);
@@ -1187,7 +1208,14 @@ export async function getMarketProbabilityHistory(
 ): Promise<ProbabilityPoint[]> {
   if (!exchange?.client.getCandles) return [];
   const raw = market.raw as Record<string, unknown> | undefined;
-  const pool = String(raw?.poolAddress ?? raw?.pool ?? "");
+  const pool = String(
+    market.poolAddress ||
+      raw?.poolAddress ||
+      raw?.binaryPoolAddress ||
+      raw?.pool ||
+      (raw?.info as Record<string, unknown> | undefined)?.poolAddress ||
+      "",
+  );
   if (!pool || !pool.startsWith("0x")) return [];
   const quoteDecimals = Number(raw?.quoteDecimals ?? 6);
   const from = market.tradingStartSec || undefined;

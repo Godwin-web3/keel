@@ -3,12 +3,21 @@ import type { JournalRow } from "./types";
 const KEY = "keel.journal.v1";
 const LEGACY_KEY = "claimroll.journal.v1";
 
+function migrateKind(kind: string): JournalRow["kind"] {
+  // Older builds logged commit/reveal as seal/unseal; map them so KIND_LABEL
+  // and filters don't go blank on leftover localStorage rows.
+  if (kind === "seal") return "commit";
+  if (kind === "unseal") return "reveal";
+  return kind as JournalRow["kind"];
+}
+
 export function loadJournal(): JournalRow[] {
   try {
     const raw = localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as JournalRow[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as Array<JournalRow & { kind: string }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((row) => ({ ...row, kind: migrateKind(row.kind) }));
   } catch {
     return [];
   }

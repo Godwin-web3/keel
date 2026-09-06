@@ -51,6 +51,7 @@ import {
   placeStake,
   redeemMarket,
   watchPools,
+  isDemoMode,
   type LeaderboardEntry,
   type ProbabilityPoint,
 } from "./lib/sdk";
@@ -374,6 +375,10 @@ export default function App() {
   // (a fresh browser, cleared storage, a bet placed elsewhere). Never blocks
   // the rest of the UI on failure — journal-derived positions still work.
   async function discoverPositions(address: string) {
+    if (isDemoMode() || address.toLowerCase().startsWith("0xdemo")) {
+      setOnchainPositions({ open: [], claimable: [] });
+      return;
+    }
     try {
       const rows = await discoverOnchainPositions(address as `0x${string}`);
       setOnchainPositions(rows);
@@ -527,7 +532,16 @@ export default function App() {
   }
 
   useEffect(() => {
-    void connectAndLoad(network);
+    void (async () => {
+      const ok = await connectAndLoad(network);
+      if (ok && isDemoMode()) {
+        // Demo mode mocks writes — sign in with a local alias so ticket /
+        // seal / claim / run buttons are not stuck behind a real wallet.
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+        setMessage({ kind: "ok", text: "Demo mode · writes are mocked." });
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -540,7 +554,13 @@ export default function App() {
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
     setSelectedId(null);
-    void connectAndLoad(next);
+    void (async () => {
+      const ok = await connectAndLoad(next);
+      if (ok && isDemoMode()) {
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+      }
+    })();
   }
 
   function onDisconnect() {
@@ -551,7 +571,14 @@ export default function App() {
     setOnchainPositions({ open: [], claimable: [] });
     setMarkets([]);
     setMessage({ kind: "ok", text: "Disconnected. Nothing you connected with was ever saved anywhere." });
-    void connectAndLoad(network);
+    void (async () => {
+      const ok = await connectAndLoad(network);
+      if (ok && isDemoMode()) {
+        setSignedIn(true);
+        setWalletAddress("0xDemo000000000000000000000000000000000001");
+        setMessage({ kind: "ok", text: "Back to demo session. Writes stay mocked." });
+      }
+    })();
   }
 
   async function onTrade(side: Side, market = selected, amount = stake, runId?: string) {
@@ -607,7 +634,7 @@ export default function App() {
       setTab("desk");
       setMessage({
         kind: "ok",
-        text: `Sealed. The outcome remains opaque ${side === "up" ? "Up" : "Down"} until you reveal.`,
+        text: "Sealed. Side stays hidden on-chain until you reveal.",
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -1042,12 +1069,31 @@ export default function App() {
                     )}
                   </button>
                 </div>
+                {isDemoMode() && (
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button
+                      className="ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setConnected(true);
+                        setSignedIn(true);
+                        setWalletAddress("0xDemo000000000000000000000000000000000001");
+                        setWalletOpen(false);
+                        setMessage({ kind: "ok", text: "Demo session on. Blockchain writes are mocked." });
+                      }}
+                    >
+                      Continue in demo
+                    </button>
+                  </div>
+                )}
                 <p className="muted" style={{ marginTop: 12 }}>
-                  {injectedAvailable
-                    ? "Use MetaMask or Rabby. You can look around first."
-                    : "No wallet found. Install MetaMask, then refresh."}
+                  {isDemoMode()
+                    ? "Demo mode is on (?demo=1). You can commit, reveal, and claim without a wallet."
+                    : injectedAvailable
+                      ? "Use MetaMask or Rabby. You can look around first."
+                      : "No wallet found. Install MetaMask, then refresh."}
                 </p>
-                {!injectedAvailable && (
+                {!injectedAvailable && !isDemoMode() && (
                   <a className="repo-link" href="https://metamask.io/download" target="_blank" rel="noreferrer">
                     Get MetaMask
                   </a>
@@ -1590,7 +1636,7 @@ export default function App() {
                 {filteredJournal.map((row) => (
                   <tr key={row.id}>
                     <td>{new Date(row.at).toLocaleString()}</td>
-                    <td>{KIND_LABEL[row.kind]}</td>
+                    <td>{KIND_LABEL[row.kind] ?? row.kind}</td>
                     <td>
                       <span className="asset-icon">{ASSET_ICON[row.asset ?? detectAsset(row.symbol || row.marketId)]}</span>
                       {row.asset ?? detectAsset(row.symbol || row.marketId)}
