@@ -112,12 +112,26 @@ export function money(n: number | null | undefined, network: NetworkName, digits
 
 export function formatWindow(tf: string): string {
   if (!tf || tf === "other") return "this window";
+  // Bare absurd second counts (e.g. "3804262") from bad tradingStart math.
+  if (/^\d+$/.test(tf)) {
+    const sec = Number(tf);
+    if (!Number.isFinite(sec) || sec <= 0 || sec > 48 * 3600) return "this window";
+    if (sec <= 20 * 60) return "15 min";
+    if (sec <= 75 * 60) return "1 hour";
+    const h = Math.round(sec / 3600);
+    return h === 1 ? "1 hour" : `${h} hours`;
+  }
   if (tf.endsWith("m")) {
     const n = tf.slice(0, -1);
+    const mins = Number(n);
+    // Absurd minute labels (never show "63387 min").
+    if (Number.isFinite(mins) && mins > 48 * 60) return "this window";
     return n === "1" ? "1 min" : `${n} min`;
   }
   if (tf.endsWith("h")) {
     const n = tf.slice(0, -1);
+    const hours = Number(n);
+    if (Number.isFinite(hours) && hours > 72) return "this window";
     return n === "1" ? "1 hour" : `${n} hours`;
   }
   if (tf.endsWith("s")) {
@@ -127,7 +141,7 @@ export function formatWindow(tf: string): string {
       if (sec <= 75 * 60) return "1 hour";
       const h = Math.round(sec / 3600);
       if (h >= 1 && h <= 72) return h === 1 ? "1 hour" : `${h} hours`;
-      // Absurd durations (bad tradingStart math) — never show "63387 min".
+      // Absurd durations (bad tradingStart math) — never show "3804262s".
       return "this window";
     }
   }
