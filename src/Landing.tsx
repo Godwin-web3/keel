@@ -11,7 +11,7 @@ export default function Landing({
   markets,
   nowMs,
 }: {
-  onLaunch: (marketId?: string) => void;
+  onLaunch: (marketId?: string, side?: "up" | "down") => void;
   markets: WindowMarket[];
   nowMs: number;
 }) {
@@ -73,10 +73,10 @@ export default function Landing({
           </div>
           <PriceChart points={points} height={140} liveUp={featured.impliedUp} />
           <div className="pm-actions">
-            <button className="pm-up" disabled={upPct === null} onClick={() => onLaunch(featured.marketId)}>
+            <button className="pm-up" disabled={upPct === null} onClick={() => onLaunch(featured.marketId, "up")}>
               {upPct === null ? "Loading…" : `Up ${upPct}%`}
             </button>
-            <button className="pm-down" disabled={upPct === null} onClick={() => onLaunch(featured.marketId)}>
+            <button className="pm-down" disabled={upPct === null} onClick={() => onLaunch(featured.marketId, "down")}>
               {upPct === null ? "Loading…" : `Down ${100 - upPct}%`}
             </button>
           </div>
