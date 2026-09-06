@@ -14,6 +14,12 @@ import type { NetworkName, Side, WindowMarket } from "./types";
 
 export type SealStatus = "sealed" | "revealed" | "refunded" | "placed";
 
+const isDemoMode = () => {
+  try { return window.location.search.includes("demo=1") || (window as any).__KEEL_DEMO_MODE; } catch { return false; }
+};
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+
 export type LocalSeal = {
   id: string;
   chainId: string;
@@ -168,6 +174,22 @@ export async function commitSeal(args: {
   side: Side;
   amount: number;
 }): Promise<LocalSeal> {
+  if (isDemoMode()) {
+    await delay(2000);
+    const id = String(Math.floor(Math.random() * 1000000));
+    const amountWei = "10000000000000000000";
+    const salt = makeSalt();
+    const row: LocalSeal = {
+      id, chainId: "0x1234567890123456789012345678901234567890" as Address,
+      marketId: args.market.marketId, symbol: args.market.symbol,
+      asset: args.market.asset, timeframe: args.market.timeframe,
+      side: args.side, amount: args.amount, amountWei, salt,
+      revealBy: sealDeadline(args.market), status: "sealed",
+      commitHash: "0x" + Array(64).fill(0).map(() => Math.floor(Math.random()*16).toString(16)).join(""),
+    };
+    saveSeals(args.network, [row, ...loadSeals(args.network)]);
+    return row;
+  }
   if (!canSeal(args.market)) throw new Error("Too close to close to seal this one. Place it in the open, or pick a later window.");
   const { publicClient, walletClient, account } = await getTradeContext(args.network);
   const seal = await ensureSealDeployed(args.network);
@@ -225,6 +247,12 @@ export async function commitSeal(args: {
 }
 
 export async function revealSeal(network: NetworkName, row: LocalSeal): Promise<string> {
+  if (isDemoMode()) {
+    await delay(2000);
+    const hash = "0x" + Array(64).fill(0).map(() => Math.floor(Math.random()*16).toString(16)).join("");
+    patchSeal(network, row.id, { status: "revealed", revealHash: hash });
+    return hash;
+  }
   const { publicClient, walletClient, account } = await getTradeContext(network);
   const seal = (row.chainId as Address) || getSealAddress(network);
   if (!seal) throw new Error("No seal contract.");
@@ -243,6 +271,12 @@ export async function revealSeal(network: NetworkName, row: LocalSeal): Promise<
 }
 
 export async function refundSeal(network: NetworkName, row: LocalSeal): Promise<string> {
+  if (isDemoMode()) {
+    await delay(1500);
+    const hash = "0x" + Array(64).fill(0).map(() => Math.floor(Math.random()*16).toString(16)).join("");
+    patchSeal(network, row.id, { status: "refunded", revealHash: hash });
+    return hash;
+  }
   const { publicClient, walletClient, account } = await getTradeContext(network);
   const seal = (row.chainId as Address) || getSealAddress(network);
   if (!seal) throw new Error("No seal contract.");
