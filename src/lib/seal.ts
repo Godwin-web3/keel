@@ -32,6 +32,14 @@ export type LocalSeal = {
   placeHash?: string;
 };
 
+
+/** Canonical KeelSeal deployments. Prefer these over per-wallet deploys. */
+export const KEEL_SEAL_ADDRESSES: Record<NetworkName, Address | null> = {
+  shannon: "0xc77d38feA2d04eF1F1870b5FE1f0Dd5f7B70a1C9",
+  // Set when KeelSeal is deployed on Somnia mainnet.
+  mainnet: null,
+};
+
 const ADDR_KEY = (n: NetworkName) => `keel.seal.addr.${n}`;
 const LIST_KEY = (n: NetworkName) => `keel.seals.${n}.v1`;
 
@@ -50,13 +58,18 @@ function saveSeals(network: NetworkName, rows: LocalSeal[]): void {
   localStorage.setItem(LIST_KEY(network), JSON.stringify(rows.slice(0, 80)));
 }
 
-export function getSealAddress(network: NetworkName): Address | null {
+/** Optional localStorage override (dev / legacy). Canonical address wins when set. */
+export function getStoredSealOverride(network: NetworkName): Address | null {
   try {
     const v = localStorage.getItem(ADDR_KEY(network));
     return v && v.startsWith("0x") ? (v as Address) : null;
   } catch {
     return null;
   }
+}
+
+export function getSealAddress(network: NetworkName): Address | null {
+  return KEEL_SEAL_ADDRESSES[network] ?? getStoredSealOverride(network);
 }
 
 function setSealAddress(network: NetworkName, addr: Address): void {
@@ -144,9 +157,26 @@ async function ensureAllowance(network: NetworkName, spender: Address, need: big
   await publicClient.waitForTransactionReceipt({ hash });
 }
 
+/**
+ * Resolve the KeelSeal contract for `network`.
+ * Shannon uses the canonical deployment (no per-user deploy).
+ * Networks without a canonical address may still deploy once from the wallet.
+ */
 export async function ensureSealDeployed(network: NetworkName): Promise<Address> {
-  const existing = getSealAddress(network);
-  if (existing) return existing;
+  const canonical = KEEL_SEAL_ADDRESSES[network];
+  if (canonical) {
+    const { publicClient } = await getTradeContext(network);
+    const code = await publicClient.getCode({ address: canonical });
+    if (!code || code === "0x") {
+      throw new Error(`Canonical KeelSeal at ${canonical} has no code on ${network}.`);
+    }
+    return canonical;
+  }
+
+  const override = getStoredSealOverride(network);
+  if (override) return override;
+
+  // No canonical yet (e.g. mainnet) — one-shot wallet deploy, cached in localStorage.
   const { publicClient, walletClient, account, collateral } = await getTradeContext(network);
   const hash = await walletClient.deployContract({
     abi: KEEL_SEAL_ABI,
