@@ -4,11 +4,11 @@ export const STATUS_LABEL: Record<MarketStatus, string> = {
   listed: "Coming up",
   trading: "Open",
   locked: "Closing",
-  settling: "Settling",
+  settling: "Awaiting settlement",
   resolved: "Settled",
   voided: "Voided",
   finalized: "Settled",
-  unknown: "Unknown",
+  unknown: "Awaiting settlement",
 };
 
 export const ASSET_ICON: Record<WindowMarket["asset"], string> = {

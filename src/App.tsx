@@ -285,7 +285,8 @@ export default function App() {
     setBetOpen(true);
   }
 
-  function closeBetSheet() {
+  function closeBetSheet(force = false) {
+    if (busy && !force) return;
     setBetOpen(false);
     setPendingBet(null);
   }
@@ -705,8 +706,8 @@ export default function App() {
     }
   }
 
-  async function onSeal(side: Side) {
-    if (!selected) return;
+  async function onSeal(side: Side): Promise<boolean> {
+    if (!selected) return false;
     setBusy(true);
     setMessage(null);
     try {
@@ -728,14 +729,16 @@ export default function App() {
         kind: "ok",
         text: "Sealed. Side stays hidden on-chain until you reveal.",
       });
+      return true;
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       if (/4100|not been authorized|provider is not ready|unauthorized/i.test(raw)) {
         setMessage({ kind: "ok", text: "OKX couldn't seal. Placing the bet in the open." });
-        await onTrade(side);
-        return;
+        const placed = await onTrade(side);
+        return Boolean(placed);
       }
       setMessage({ kind: "error", text: friendlyWalletError(err) });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -802,8 +805,8 @@ export default function App() {
     }
   }
 
-  async function onParlay(aSide: Side, bSide: Side) {
-    if (!selected || !parlayPartner) return;
+  async function onParlay(aSide: Side, bSide: Side): Promise<boolean> {
+    if (!selected || !parlayPartner) return false;
     const q = quoteParlay(selected, aSide, parlayPartner, bSide, stake);
     setBusy(true);
     setMessage(null);
@@ -844,15 +847,18 @@ export default function App() {
       setJournal(loadJournal());
       setTab("desk");
       const failed = placed.legs.filter((l) => l.error);
+      const allFailed = failed.length === placed.legs.length;
       setMessage({
-        kind: failed.length === placed.legs.length ? "error" : "ok",
+        kind: allFailed ? "error" : "ok",
         text:
           failed.length === 0
             ? `Parlay filled · ${selected.asset} × ${parlayPartner.asset}. Both must hit.`
             : `Parlay partial: ${failed.map((f) => f.error).join(" · ")}`,
       });
+      return !allFailed;
     } catch (err) {
       setMessage({ kind: "error", text: friendlyWalletError(err) });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1196,11 +1202,11 @@ export default function App() {
       )}
 
       {betOpen && selected && (
-        <div className="confirm-backdrop" onClick={closeBetSheet}>
+        <div className="confirm-backdrop" onClick={() => closeBetSheet()}>
           <div className="confirm-card bet-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-sheet-head">
               <h2>{pendingBet ? (pendingBet.kind === "parlay" ? "Confirm both commitments" : "Confirm") : "Commit"}</h2>
-              <button className="ghost" onClick={closeBetSheet}>
+              <button className="ghost" disabled={busy} onClick={() => closeBetSheet()}>
                 Close
               </button>
             </div>
@@ -1235,7 +1241,7 @@ export default function App() {
                     }}
                     disabled={!canSeal(selected) && !sealOn}
                   />
-                  Commit this intent. The outcome remains opaque Up or Down until you reveal.
+                  Seal (commit–reveal): hide your side on-chain until you Reveal. Not an open DreamDEX position until then.
                 </label>
                 {parlayOn && parlayPartner && (
                   <>
@@ -1285,7 +1291,7 @@ export default function App() {
                       </div>
                       <div>
                         <span>If you're wrong</span>
-                        {money(stake, network)}
+                        {money(0, network)}
                       </div>
                     </>
                   ) : (
@@ -1300,7 +1306,7 @@ export default function App() {
                       </div>
                       <div>
                         <span>If you're wrong</span>
-                        {money(stake, network)}
+                        {money(0, network)}
                       </div>
                     </>
                   )}
@@ -1364,8 +1370,8 @@ export default function App() {
                     : !signedIn
                         ? "Connect your wallet to place this."
                         : sealOn
-                          ? "Seal it first. The outcome is opaque until you reveal."
-                          : "You only lose what you put in."}
+                          ? "Sealing commits your stake now; your side stays hidden until you Reveal on Positions."
+                          : "You only lose what you put in — wrong side returns $0."}
                 </p>
               </>
             )}
@@ -1387,9 +1393,10 @@ export default function App() {
                   </div>
                   <div>
                     <span>If you're wrong</span>
-                    {money(stake, network)}
+                    {money(0, network)}
                   </div>
                 </div>
+                {message?.kind === "error" && <div className="sheet-error">{message.text}</div>}
                 <div className="actions" style={{ marginTop: 16 }}>
                   <button
                     className={pendingBet.side}
@@ -1401,18 +1408,23 @@ export default function App() {
                         return;
                       }
                       const side = pendingBet.side;
-                      closeBetSheet();
-                      if (sealOn) void onSeal(side);
-                      else void onTrade(side);
+                      void (async () => {
+                        const ok = sealOn ? await onSeal(side) : Boolean(await onTrade(side));
+                        if (ok) closeBetSheet(true);
+                      })();
                     }}
                   >
                     {!signedIn
                       ? "Connect to confirm"
-                      : sealOn
-                        ? `Seal ${pendingBet.side === "up" ? "Up" : "Down"}`
-                        : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
+                      : busy
+                        ? sealOn
+                          ? "Sealing…"
+                          : "Placing…"
+                        : sealOn
+                          ? "Seal (hide side)"
+                          : `Confirm ${pendingBet.side === "up" ? "Up" : "Down"}`}
                   </button>
-                  <button className="ghost" onClick={() => setPendingBet(null)}>
+                  <button className="ghost" disabled={busy} onClick={() => setPendingBet(null)}>
                     Back
                   </button>
                 </div>
@@ -1448,6 +1460,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="actions" style={{ marginTop: 16 }}>
+                  {message?.kind === "error" && <div className="sheet-error">{message.text}</div>}
                   <button
                     disabled={busy}
                     onClick={() => {
@@ -1458,13 +1471,15 @@ export default function App() {
                       }
                       const a = pendingBet.a;
                       const b = pendingBet.b;
-                      closeBetSheet();
-                      void onParlay(a, b);
+                      void (async () => {
+                        const ok = await onParlay(a, b);
+                        if (ok) closeBetSheet(true);
+                      })();
                     }}
                   >
-                    {!signedIn ? "Connect to confirm" : "Confirm both commitments"}
+                    {!signedIn ? "Connect to confirm" : busy ? "Placing…" : "Confirm both commitments"}
                   </button>
-                  <button className="ghost" onClick={() => setPendingBet(null)}>
+                  <button className="ghost" disabled={busy} onClick={() => setPendingBet(null)}>
                     Back
                   </button>
                 </div>
@@ -1622,14 +1637,14 @@ export default function App() {
       )}
 
       {tab === "desk" && (
-        <div className="grid tab-enter">
-          <section className="card">
-            <h2>Your positions</h2>
+        <div className="grid tab-enter desk-page">
+          <section className="card desk-card">
+            <h2>Positions</h2>
             {seals.some((s) => s.status === "sealed") && (
-              <>
+              <div className="desk-section">
                 <h3 className="muted">Sealed</h3>
-                <p className="muted" style={{ marginTop: -6, marginBottom: 10 }}>
-                  Hidden on-chain. Reveal to place it on DreamDEX. Miss the time and the money comes back.
+                <p className="desk-section-note">
+                  Hidden on-chain. Reveal to place on DreamDEX. Miss the window and the stake returns.
                 </p>
                 {seals
                   .filter((s) => s.status === "sealed")
@@ -1664,18 +1679,18 @@ export default function App() {
                       </div>
                     );
                   })}
-              </>
+              </div>
             )}
-            <label className="muted" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-              <input
-                type="checkbox"
-                checked={autoClaim}
-                onChange={(e) => setAutoClaim(e.target.checked)}
-                disabled={!signedIn}
-              />
-              Pay me automatically when a position settles.
-            </label>
-            <div className="actions" style={{ marginBottom: 14 }}>
+            <div className="desk-toolbar">
+              <label className="muted desk-autoclose">
+                <input
+                  type="checkbox"
+                  checked={autoClaim}
+                  onChange={(e) => setAutoClaim(e.target.checked)}
+                  disabled={!signedIn}
+                />
+                Auto-claim when a position settles
+              </label>
               <button
                 disabled={busy || claimable.length === 0 || !signedIn}
                 onClick={() => {
@@ -1687,57 +1702,65 @@ export default function App() {
                   })();
                 }}
               >
-                Claim all winnings
+                Claim all
               </button>
             </div>
-            <h3 className="muted">Open</h3>
-            {open.length === 0 && <p className="muted">No open positions.</p>}
-            {open.map((p) => (
-              <div key={p.marketId + p.side} className="market">
-                <div className="market-top">
-                  <strong className="market-name">
-                    <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
-                    {p.asset} <span className="muted">· {formatWindow(p.timeframe)}</span>
-                  </strong>
-                  <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
-                </div>
-                <div className="muted">
-                  {p.stake !== null ? (
-                    <>
-                      You put {money(p.stake, network)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
-                      {p.entryProb !== null ? ` · ${formatProb(p.entryProb)} chance` : ""}
-                    </>
-                  ) : (
-                    <>
-                      You have {formatUsd(p.contracts, 3)} contracts on{" "}
-                      <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-            <h3 className="muted">Ready to claim</h3>
-            {claimable.length === 0 && (
-              <p className="muted">Nothing to collect yet.</p>
-            )}
-            {claimable.map((c) => (
-              <div key={`${c.marketId}:${c.side}`} className="market">
-                <div className="market-top">
-                  <strong className="market-name">
-                    <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
-                    {c.asset} <span className="muted">· {formatWindow(c.timeframe)} · {c.side === "up" ? "Up" : "Down"}</span>
-                  </strong>
-                  <button
-                    disabled={busy || !signedIn}
-                    onClick={() => void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout)}
-                  >
-                    Claim {money(c.estimatedPayout, network)}
-                  </button>
-                </div>
-              </div>
-            ))}
+            <div className="desk-section">
+              <h3 className="muted">Open</h3>
+              {open.length === 0 ? (
+                <p className="desk-empty">No open positions — filled bets stay here until settlement.</p>
+              ) : (
+                open.map((p) => (
+                  <div key={p.marketId + p.side} className="market">
+                    <div className="market-top">
+                      <strong className="market-name">
+                        <span className="asset-icon">{ASSET_ICON[p.asset]}</span>
+                        {p.asset} <span className="muted">· {formatWindow(p.timeframe)}</span>
+                      </strong>
+                      <span className={`badge ${p.status}`}>{STATUS_LABEL[p.status]}</span>
+                    </div>
+                    <div className="muted">
+                      {p.stake !== null ? (
+                        <>
+                          You put {money(p.stake, network)} on <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
+                          {p.entryProb !== null ? ` · ${formatProb(p.entryProb)} chance` : ""}
+                        </>
+                      ) : (
+                        <>
+                          You have {formatUsd(p.contracts, 3)} contracts on{" "}
+                          <strong className={p.side}>{p.side === "up" ? "Up" : "Down"}</strong>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="desk-section">
+              <h3 className="muted">Ready to claim</h3>
+              {claimable.length === 0 ? (
+                <p className="desk-empty">Nothing to collect yet.</p>
+              ) : (
+                claimable.map((c) => (
+                  <div key={`${c.marketId}:${c.side}`} className="market">
+                    <div className="market-top">
+                      <strong className="market-name">
+                        <span className="asset-icon">{ASSET_ICON[c.asset]}</span>
+                        {c.asset} <span className="muted">· {formatWindow(c.timeframe)} · {c.side === "up" ? "Up" : "Down"}</span>
+                      </strong>
+                      <button
+                        disabled={busy || !signedIn}
+                        onClick={() => void onRedeem(c.marketId, c.symbol, c.side, c.asset, c.estimatedPayout)}
+                      >
+                        Claim {money(c.estimatedPayout, network)}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </section>
-          <section className="card">
+          <section className="card desk-card">
             <h2>Activity</h2>
             <div className="edge-readout">
               <div className="edge-headline">
@@ -1755,54 +1778,56 @@ export default function App() {
                 </span>
               </div>
             </div>
-            <div className="filter-chips">
+            <div className="filter-chips" role="tablist" aria-label="Activity filters">
               {(["all", "won", "lost", "collected"] as HistoryFilter[]).map((f) => (
-                <button key={f} className={historyFilter === f ? "active" : ""} onClick={() => setHistoryFilter(f)}>
+                <button
+                  key={f}
+                  type="button"
+                  className={historyFilter === f ? "active" : ""}
+                  onClick={() => setHistoryFilter(f)}
+                >
                   {f === "all" ? "All" : f === "won" ? "Won" : f === "lost" ? "Lost" : "Collected"}
                 </button>
               ))}
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>What</th>
-                  <th>Market</th>
-                  <th>Detail</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredJournal.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="muted">
-                      {journal.length === 0
-                        ? "Nothing here yet. This list stays on this phone or computer."
-                        : "Nothing matches this filter."}
-                    </td>
-                  </tr>
-                )}
-                {filteredJournal.map((row) => (
-                  <tr key={row.id}>
-                    <td>{new Date(row.at).toLocaleString()}</td>
-                    <td>{KIND_LABEL[row.kind] ?? row.kind}</td>
-                    <td>
-                      <span className="asset-icon">{ASSET_ICON[row.asset ?? detectAsset(row.symbol || row.marketId)]}</span>
-                      {row.asset ?? detectAsset(row.symbol || row.marketId)}
-                    </td>
-                    <td>
-                      {row.side ? (row.side === "up" ? "Up" : "Down") + " · " : ""}
-                      {row.stake !== undefined ? `${money(row.stake, network)} · ` : ""}
-                      {row.hash ? shorten(row.hash) : row.note || row.result || ""}
-                      {row.kind === "redeem" && row.result === "win" && (
-                        <button className="share-btn" onClick={() => shareWin(row)}>
-                          Share
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {filteredJournal.length === 0 ? (
+              <p className="desk-empty">
+                {journal.length === 0
+                  ? "No activity yet. Trades you place stay on this device."
+                  : "Nothing matches this filter."}
+              </p>
+            ) : (
+              <div className="activity-list">
+                {filteredJournal.map((row) => {
+                  const asset = row.asset ?? detectAsset(row.symbol || row.marketId);
+                  return (
+                    <article key={row.id} className="activity-row">
+                      <div className="activity-row-top">
+                        <span className="activity-kind">{KIND_LABEL[row.kind] ?? row.kind}</span>
+                        <time className="activity-when">{new Date(row.at).toLocaleString()}</time>
+                      </div>
+                      <div className="activity-row-main">
+                        <span className="asset-icon">{ASSET_ICON[asset]}</span>
+                        <strong>{asset}</strong>
+                        <span className="muted">
+                          {row.side ? (row.side === "up" ? "Up" : "Down") : ""}
+                          {row.side && row.stake !== undefined ? " · " : ""}
+                          {row.stake !== undefined ? money(row.stake, network) : ""}
+                        </span>
+                      </div>
+                      <div className="activity-row-detail muted">
+                        {row.hash ? shorten(row.hash) : row.note || row.result || ""}
+                        {row.kind === "redeem" && row.result === "win" && (
+                          <button className="share-btn" onClick={() => shareWin(row)}>
+                            Share
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </div>
       )}

@@ -806,6 +806,148 @@ button:disabled {
   margin: 18px 0 8px;
 }
 
+.desk-page .card h3.muted {
+  margin: 0 0 8px;
+}
+
+.desk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.desk-section {
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+
+.desk-section-note,
+.desk-empty {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.desk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 16px;
+}
+
+.desk-autoclose {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sheet-error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #5a2228;
+  background: #2a1216;
+  color: #ff8f8f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.filter-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-chips button {
+  flex: 0 0 auto;
+  background: var(--bg-2);
+  color: var(--muted);
+  border: 0;
+  min-height: 36px;
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.filter-chips button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-row {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+}
+
+.activity-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.activity-kind {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.activity-when {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.activity-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.activity-row-detail {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  word-break: break-word;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (min-width: 720px) {
+  .activity-when {
+    white-space: nowrap;
+  }
+}
+
 .market {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

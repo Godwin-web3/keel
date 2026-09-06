@@ -1094,7 +1094,12 @@ export function derivePositions(
     const side = row.side ?? "up";
     if (redeemedKeys.has(`${row.marketId}:${side}`)) continue;
     const market = markets.find((m) => m.marketId === row.marketId);
-    const status = market?.status ?? "unknown";
+    // When the window rolls off the live markets list, status would be
+    // "unknown" and the position vanished — keep pending journal trades
+    // visible as open / awaiting settlement until resolved or redeemed.
+    const rawStatus = market?.status ?? "unknown";
+    const status =
+      !market || rawStatus === "unknown" ? "settling" : rawStatus;
     const stake = row.stake ?? 0;
     const entryProb = row.entryProb ?? 0.5;
     const contracts = entryProb > 0 ? stake / entryProb : 0;
